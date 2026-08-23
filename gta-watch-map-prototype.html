@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GTA Watch Map Prototype</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Arial, Helvetica, sans-serif;
+      background: #111;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      display: grid;
+      place-items: center;
+      background:
+        radial-gradient(circle at 50% 15%, #303830 0, transparent 320px),
+        linear-gradient(135deg, #181818, #0a0d10 55%, #111);
+      overflow: hidden;
+    }
+
+    .watch {
+      width: min(410px, 92vw);
+      aspect-ratio: 410 / 502;
+      position: relative;
+      overflow: hidden;
+      background: #151915;
+      border: 8px solid #050607;
+      border-radius: 32px;
+      box-shadow:
+        0 34px 90px rgba(0, 0, 0, .65),
+        inset 0 0 0 1px rgba(255, 255, 255, .12);
+      user-select: none;
+      cursor: pointer;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    .hud {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      border: 2px solid rgba(230, 238, 213, .45);
+      box-shadow: inset 0 0 0 5px rgba(0, 0, 0, .32);
+    }
+
+    .strip {
+      position: absolute;
+      left: 12px;
+      right: 12px;
+      bottom: 12px;
+      min-height: 38px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 12px;
+      padding: 7px 10px;
+      color: #eaf0dd;
+      background: rgba(9, 12, 10, .74);
+      border: 1px solid rgba(222, 235, 204, .28);
+      font-size: 12px;
+      letter-spacing: 0;
+      text-transform: uppercase;
+      backdrop-filter: blur(6px);
+    }
+
+    .street {
+      min-width: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .meta {
+      color: #aee071;
+      font-weight: 700;
+    }
+
+    .mode {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      padding: 5px 8px;
+      color: #f1f5de;
+      background: rgba(7, 9, 8, .72);
+      border: 1px solid rgba(222, 235, 204, .25);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0;
+      text-transform: uppercase;
+    }
+  </style>
+</head>
+<body>
+  <main class="watch" id="watch" aria-label="Rectangular GTA-style watch map preview">
+    <canvas id="map" width="410" height="502"></canvas>
+    <div class="hud"></div>
+    <div class="mode" id="mode">Close</div>
+    <div class="strip">
+      <div class="street">Baytree Canyon Rd</div>
+      <div class="meta" id="meta">18 mph</div>
+    </div>
+  </main>
+
+  <script>
+    const canvas = document.getElementById('map');
+    const ctx = canvas.getContext('2d');
+    const watch = document.getElementById('watch');
+    const modeLabel = document.getElementById('mode');
+    const meta = document.getElementById('meta');
+
+    let overview = false;
+    let t = 0;
+
+    const roads = [
+      { color: '#d9d0b9', width: 18, pts: [[-160, 120], [-80, 82], [12, 112], [112, 92], [250, 128], [510, 80]] },
+      { color: '#c5c0ac', width: 14, pts: [[210, -60], [188, 60], [208, 150], [176, 245], [225, 370], [190, 570]] },
+      { color: '#8e9e87', width: 8, pts: [[-40, 328], [92, 300], [178, 328], [300, 292], [454, 334]] },
+      { color: '#b5aa96', width: 10, pts: [[-60, 18], [46, 68], [120, 158], [132, 254], [102, 398], [142, 548]] },
+      { color: '#d3ccb5', width: 12, pts: [[310, -42], [268, 86], [286, 192], [338, 270], [326, 486], [384, 580]] },
+      { color: '#6f8c7a', width: 7, pts: [[-80, 444], [60, 420], [158, 444], [270, 416], [496, 432]] },
+    ];
+
+    const blocks = [
+      [36, 190, 64, 42], [312, 154, 48, 88], [260, 332, 76, 44],
+      [54, 36, 72, 40], [120, 356, 42, 86], [332, 36, 42, 64],
+      [18, 454, 92, 30], [246, 438, 56, 36],
+    ];
+
+    function path(points, scale, ox, oy) {
+      ctx.beginPath();
+      points.forEach(([x, y], index) => {
+        const px = (x - 205) * scale + 205 + ox;
+        const py = (y - 251) * scale + 251 + oy;
+        if (index === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      });
+    }
+
+    function drawRoad(points, color, width, scale, ox, oy) {
+      path(points, scale, ox, oy);
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = 'rgba(24, 27, 24, .68)';
+      ctx.lineWidth = width * scale + 7;
+      ctx.stroke();
+      path(points, scale, ox, oy);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width * scale;
+      ctx.stroke();
+    }
+
+    function drawPlayer() {
+      ctx.save();
+      ctx.translate(205, 251);
+      ctx.rotate(-0.18);
+      ctx.beginPath();
+      ctx.moveTo(0, -22);
+      ctx.lineTo(15, 18);
+      ctx.lineTo(0, 10);
+      ctx.lineTo(-15, 18);
+      ctx.closePath();
+      ctx.fillStyle = '#f5f4e6';
+      ctx.shadowColor = 'rgba(0,0,0,.65)';
+      ctx.shadowBlur = 8;
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#101410';
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function draw() {
+      t += 0.012;
+      const scale = overview ? 0.62 : 1.18;
+      const drift = overview ? 6 : 20;
+      const ox = Math.cos(t) * drift;
+      const oy = Math.sin(t * 0.8) * drift;
+
+      ctx.clearRect(0, 0, 410, 502);
+      ctx.fillStyle = '#394538';
+      ctx.fillRect(0, 0, 410, 502);
+
+      ctx.fillStyle = '#253328';
+      ctx.fillRect(0, 0, 410, 116);
+      ctx.fillStyle = '#304735';
+      ctx.fillRect(0, 350, 410, 152);
+
+      blocks.forEach(([x, y, w, h], index) => {
+        const bx = (x - 205) * scale + 205 + ox;
+        const by = (y - 251) * scale + 251 + oy;
+        ctx.fillStyle = index % 2 ? '#4e594a' : '#5b634f';
+        ctx.fillRect(bx, by, w * scale, h * scale);
+      });
+
+      roads.forEach((road) => drawRoad(road.pts, road.color, road.width, scale, ox, oy));
+
+      drawRoad([[58, 520], [92, 410], [142, 325], [205, 251], [286, 182], [376, 116]], '#d7df4c', 8, scale, ox, oy);
+      drawPlayer();
+
+      ctx.fillStyle = 'rgba(0, 0, 0, .26)';
+      ctx.fillRect(0, 0, 410, 502);
+      modeLabel.textContent = overview ? 'Overview' : 'Close';
+      meta.textContent = overview ? '0.8 mi' : '18 mph';
+      requestAnimationFrame(draw);
+    }
+
+    watch.addEventListener('click', () => {
+      overview = !overview;
+    });
+
+    draw();
+  </script>
+</body>
+</html>

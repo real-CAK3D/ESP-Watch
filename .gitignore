@@ -1,0 +1,36 @@
+# Build outputs and local toolchains
+.pio-core/
+android-build-tools/
+**/.pio/
+**/.gradle/
+**/build/
+**/.cxx/
+**/node_modules/
+
+# Local downloads, caches, and generated reference checkouts
+downloads/
+backups/
+esp-who/
+xiao-s3-vision/
+waveshare-esp32-s3-touch-amoled-2.06/
+gta-gps-ref/
+gta-map-circle-ref/
+s3watch-ref/
+oleds3watch-ref/
+tsixom-watch-buddy-ref/
+tsixom-buddy-src/
+chronos-esp32/.git/
+
+# Generated/package artifacts
+*.apk
+*.bin
+*.elf
+*.map
+*.factory.bin
+*.zip
+*.tar.gz
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+desktop.ini

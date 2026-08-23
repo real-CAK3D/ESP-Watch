@@ -1,0 +1,16 @@
+plugins {
+    id "com.android.application"
+}
+
+android {
+    namespace "com.gtanav.companion"
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "com.gtanav.companion"
+        minSdk 26
+        targetSdk 35
+        versionCode 8
+        versionName "0.2.0"
+    }
+}

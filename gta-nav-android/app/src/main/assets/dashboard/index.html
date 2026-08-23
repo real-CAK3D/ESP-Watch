@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GTA-Nav Phone</title>
+  <meta name="theme-color" content="#050606">
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body data-theme="emerald">
+  <main class="phone-shell" aria-label="GTA-Nav phone dashboard">
+    <section class="screen">
+        <header class="status">
+        <span class="bars signal-offline" id="watchSignal" aria-label="watch signal"><i></i><i></i><i></i></span>
+        <strong id="clock">--:--</strong>
+        <span id="bleState">offline</span>
+      </header>
+      <section class="home-grid" id="homeGrid">
+        <button class="app app-gps" data-panel="gps"><span>Trackify</span></button>
+        <button class="app app-phone" data-panel="contacts"><span>Phone</span></button>
+        <button class="app app-text" data-panel="texts"><span>Texts</span></button>
+        <button class="app app-mail" data-panel="mail"><span>Mail</span></button>
+        <button class="app app-web" data-panel="web"><span>Web</span></button>
+        <button class="app app-jobs" data-panel="jobs"><span>Jobs</span></button>
+        <button class="app app-mechanic" data-panel="mechanic"><span>Mechanic</span></button>
+        <button class="app app-buddy" data-panel="buddy"><span>Buddy</span></button>
+        <button class="app app-camera" data-panel="camera"><span>Snap</span></button>
+        <button class="app app-gallery" data-panel="gallery"><span>Gallery</span></button>
+        <button class="app app-bank" data-panel="bank"><span>Bank</span></button>
+        <button class="app app-save" data-panel="save"><span>Quick Save</span></button>
+        <button class="app app-calendar" data-panel="calendar"><span>Calendar</span></button>
+        <button class="app app-debug" data-panel="debug"><span>Debug</span></button>
+        <button class="app app-settings" data-panel="settings"><span>Settings</span></button>
+      </section>
+
+      <section class="panel" id="gpsPanel" hidden>
+        <div class="panel-head">
+          <button class="back">‹</button>
+          <h1>Pause Map</h1>
+        </div>
+        <div class="pause-map" id="pauseMap">
+          <canvas id="pauseMapCanvas" width="900" height="640"></canvas>
+          <p class="map-fallback" id="mapFallback">Loading pause map...</p>
+          <div class="map-zoom-controls">
+            <button id="mapZoomIn" type="button">+</button>
+            <button id="mapZoomOut" type="button">-</button>
+            <button id="mapZoomReset" type="button">□</button>
+          </div>
+          <div class="map-hud">
+            <strong>GTA-Nav</strong>
+            <span id="mapMode">Lewiston / Auburn</span>
+          </div>
+          <button id="toggleLegend" class="legend-toggle">Legend</button>
+          <aside class="map-legend" id="mapLegend" hidden>
+            <button id="closeLegend">×</button>
+            <h2>Legend</h2>
+            <p><i class="blip player-dot"></i>You</p>
+            <p><i class="blip parked-dot"></i>Parked Car</p>
+            <p><i class="line route-line"></i>Route</p>
+            <p><i class="line road-line"></i>Road</p>
+            <p><i class="box safe-box"></i>Safe House</p>
+          </aside>
+        </div>
+        <div class="actions">
+          <button id="connectBle">Connect Watch</button>
+          <button id="startGps">Start GPS</button>
+          <button id="testMove">Test Move</button>
+          <button id="savePark">Save Park</button>
+          <button id="routeDriveMode" type="button">Drive</button>
+          <button id="routeWalkMode" type="button">Walk</button>
+          <button id="headingLeft">Blip Left</button>
+          <button id="headingRight">Blip Right</button>
+        </div>
+        <div class="bridge-status">
+          <span id="gpsStatus">GPS idle</span>
+          <span id="bridgeStatus">Watch not linked</span>
+          <span id="headingStatus">Heading --</span>
+        </div>
+        <p id="gpsReadout" class="hint">Waiting for location permission.</p>
+        <div class="ble-scan-list" id="bleScanList" hidden></div>
+        <button id="copyCommand">Copy Last GPS Command</button>
+        <textarea id="commandBox" spellcheck="false"></textarea>
+      </section>
+
+      <section class="panel" id="contactsPanel" hidden>
+        <div class="panel-head">
+          <button class="back">‹</button>
+          <h1>Phone</h1>
+        </div>
+        <div class="dialer">
+          <input id="dialInput" inputmode="tel" placeholder="Type number">
+          <button id="dialCall">Call</button>
+        </div>
+        <p class="hint" id="dialResponse">Known real-world links can call or text. Secret numbers use original GTA-Nav responses.</p>
+        <div class="actions">
+          <button id="loadPhoneContacts" type="button">Link Phone Contacts</button>
+          <button id="loadRecentCalls" type="button">Link Recent Calls</button>
+          <button id="syncPhoneBookWatch" type="button">Sync Watch Phonebook</button>
+        </div>
+        <p class="hint" id="phoneLinkStatus">Phonebook uses permissions from Android when available.</p>
+        <div id="missedCallList" class="missed-call-list"></div>
+        <div id="contactList"></div>
+      </section>
+
+      <section class="panel" id="textsPanel" hidden>
+        <div class="panel-head">
+          <button class="back">‹</button>
+          <h1>Texts</h1>
+        </div>
+        <div class="text-thread">
+          <label>Contact<select id="textContact"></select></label>
+          <div id="textTranscript" class="text-transcript"></div>
+          <div class="text-compose">
+            <input id="textInput" placeholder="Ask about your car, claim, route, or weather">
+            <button id="sendText" type="button">Send</button>
+          </div>
+          <button id="textRouteParked" type="button">Route Parked Car</button>
+        </div>
+      </section>
+
+      <section class="panel" id="mailPanel" hidden>
+        <div class="panel-head">
+          <button class="back">‹</button>
+          <h1>Mail</h1>
+        </div>
+        <article class="message-card">
+          <b>Safe House Registry</b>
+          <p>Saved places can be promoted to fast-travel route targets.</p>
+        </article>
+        <article class="message-card">
+          <b>Tile Depot</b>
+          <p>Offline OSM road packs belong in the watch SD card under /gta_map.</p>
+        </article>
+        <div id="mailList" class="mail-list"></div>
+      </section>
+
+      <section class="panel" id="webPanel" hidden>
+        <div class="panel-head">
+          <button class="back">‹</button>
+          <h1>Web</h1>
+        </div>
+        <button class="web-link" id="openGtaWeb" type="button">Eyefind-ish</button>
+        <button class="web-link" id="openDosGta" type="button">Play DOS GTA</button>
+        <button class="web-link" id="openOsmWeb" type="button">OpenStreetMap</button>
+      </section>
+
+      <section class="panel" id="jobsPanel" hidden>
+        <div class="panel-head">
+          <button class="back">‹</button>
+          <h1>Jobs</h1>
+        </div>
+        <button class="job-card" id="routeWork">Route To Work</button>
+        <button class="job-card" data-command="THEME,dark">Night Drive</button>
+        <button class="job-card" data-command="PARK">Mark Current Parking</button>
+        <section class="landmark-editor">
+          <h2>Landmarks</h2>
+          <div class="landmark-form">
+            <input id="landmarkName" placeholder="Real place name">
+            <input id="landmarkAddress" list="addressSuggestions" placeholder="Address or place">
+            <datalist id="addressSuggestions"></datalist>
+            <select id="landmarkType"></select>
+            <div id="landmarkIconGrid" class="landmark-icon-grid" aria-label="landmark icon"></div>
+            <input id="landmarkLat" inputmode="decimal" placeholder="Latitude">
+            <input id="landmarkLon" inputmode="decimal" placeholder="Longitude">
+            <button id="lookupAddress">Find Address</button>
+            <button id="useCurrentLocation">Use Current</button>
+            <button id="saveLandmark">Save Landmark</button>
+          </div>
+          <div id="landmarkList" class="landmark-list"></div>
+        </section>
+      </section>
+
+      <section class="panel" id="mechanicPanel" hidden>
+        <div class="panel-head">
+          <button class="back">‹</button>
+          <h1>Mechanic</h1>
+        </div>
+        <div class="call-card">
+          <p id="mechanicLine">Dispatch here. Your last parked car can be routed live to the watch.</p>
+          <p class="hint" id="mechanicRouteHint">Want me to show you directions?</p>
+          <div class="actions">
+            <button id="speakMechanic">Voice Line</button>
+            <button id="showParked">Show Parked Car</button>
+            <button id="routeParked">Show Directions</button>
+            <a href="tel:+15551234567">Call Mechanic</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" id="buddyPanel" hidden>
+        <div class="panel-head">
+          <button class="back">‹</button>
+          <h1>Buddy</h1>
+        </div>
+        <div class="call-card buddy-card">
+          <p id="buddyLine">Phone mic bridge ready. Tap Listen and talk to Buddy.</p>
+          <p class="hint" id="buddyMicStatus">Mic idle</p>
+          <div class="actions">
+            <button id="startBuddyMic" type="button">Listen</button>
+            <button id="stopBuddyMic" type="button">Stop</button>
+            <button id="sendBuddyWatch" type="button">Send To Watch</button>
+          </div>
+          <textarea id="buddyTranscript" spellcheck="false" placeholder="Voice transcript or typed Buddy request"></textarea>
+        </div>
+      </section>
+
+      <section class="panel" id="cameraPanel" hidden>
+        <div class="panel-head">
+          <button class="back">‹</button>
+          <h1>Snap</h1>
+        </div>
+        <video id="cameraView" autoplay playsinline muted></video>
+        <div class="actions">
+          <button id="openCamera">Open Camera</button>
+          <button id="snapPhoto">Take Picture</button>
+        </div>
+      </section>
+
+      <section class="panel" id="galleryPanel" hidden>
+        <div class="panel-head">
+          <button class="back">‹</button>
+          <h1>Gallery</h1>
+        </div>
+        <div class="actions">
+          <button id="loadPhoneGallery" type="button">Link Phone Gallery</button>
+          <button id="syncGalleryWatch" type="button">Sync Watch Album</button>
+        </div>
+        <p class="hint" id="galleryLinkStatus">Album sync sends labels first; thumbnail transfer comes next.</p>
+        <div class="gallery" id="gallery"></div>
+      </section>
+
+      <section class="panel" id="bankPanel" hidden>
+        <div class="panel-head">
+          <button class="back">‹</button>
+          <h1>Bank</h1>
+        </div>
+        <div class="balance">
+          <span>Route Budget</span>
+          <strong id="bankCurrent">$0.00</strong>
+        </div>
+        <div class="stat-list">
+          <p><span>Weekly Spend</span><b id="bankWeekly">$0.00</b></p>
+          <p><span>Saved Trips</span><b id="bankSaved">0</b></p>
+          <p><span>Last Route</span><b id="bankLast">None</b></p>
+          <p><span>Mode</span><b id="bankMode">Drive</b></p>
+          <p><span>Distance</span><b id="bankDistance">0.0 mi</b></p>
+          <p><span>Fuel</span><b id="bankFuel">$0.00</b></p>
+          <p><span>Stop/Go</span><b id="bankStopGo">$0.00</b></p>
+          <p><span>Tolls</span><b id="bankTolls">$0.00</b></p>
+        </div>
+      </section>
+
+      <section class="panel" id="savePanel" hidden>
+        <div class="panel-head">
+          <button class="back">‹</button>
+          <h1>Quick Save</h1>
+        </div>
+        <button id="quickSavePark">Save Parking Location</button>
+        <p class="hint" id="saveStatus">No parking location saved this session.</p>
+      </section>
+
+      <section class="panel" id="calendarPanel" hidden>
+        <div class="panel-head">
+          <button class="back">‹</button>
+          <h1>Calendar</h1>
+        </div>
+        <div class="calendar-card">
+          <span id="calendarDow">---</span>
+          <strong id="calendarDate">---- -- --</strong>
+          <small id="calendarTimezone">Phone timezone</small>
+        </div>
+        <div class="stat-list">
+          <div><span>Safe House</span><b id="calendarHome">Not set</b></div>
+          <div><span>Work</span><b id="calendarWork">Not set</b></div>
+          <div><span>Alarm</span><b id="calendarAlarm">Off</b></div>
+          <div><span>Phone Events</span><b id="calendarLinked">0 linked</b></div>
+        </div>
+        <div id="calendarEvents" class="calendar-events"></div>
+        <button id="linkPhoneCalendar" type="button">Link Phone Calendar</button>
+        <button id="syncCalendarWatch">Sync Watch Calendar</button>
+      </section>
+
+      <section class="panel" id="settingsPanel" hidden>
+        <div class="panel-head">
+          <button class="back">‹</button>
+          <h1>Settings</h1>
+        </div>
+        <div class="theme-grid">
+          <button class="theme-dot theme-one" data-theme="theme1">Theme 1</button>
+          <button class="theme-dot theme-two" data-theme="theme2">Theme 2</button>
+          <button class="theme-dot theme-three" data-theme="theme3">Theme 3</button>
+        </div>
+        <div class="settings-form">
+          <label>Safe House<input id="settingsHome" placeholder="Home address"></label>
+          <label>Work<input id="settingsWork" placeholder="Work address"></label>
+          <label>Timezone<select id="settingsTimezone"></select></label>
+          <label>Date<input id="settingsDate" type="date"></label>
+          <label>Time<input id="settingsTime" type="time" step="60"></label>
+          <label>Year<input id="settingsYear" inputmode="numeric" placeholder="Year"></label>
+          <label>Alarm<input id="settingsAlarmTime" type="time"></label>
+          <label>Alarm Label<input id="settingsAlarmLabel" placeholder="Morning run"></label>
+          <label>Clock Face<select id="settingsClockFace"></select></label>
+          <label class="toggle-line"><input id="settingsAlarmEnabled" type="checkbox"> Enable alarm</label>
+          <label>Vehicle<input id="settingsVehicle" placeholder="Vehicle"></label>
+          <label>Fuel<input id="settingsFuelType" placeholder="Fuel type"></label>
+          <label>Tank<input id="settingsTankGallons" inputmode="decimal" placeholder="Tank gallons"></label>
+          <label>MPG<input id="settingsMpg" inputmode="decimal" placeholder="MPG"></label>
+          <label>Gas<input id="settingsGasPrice" inputmode="decimal" placeholder="Gas price"></label>
+          <label>Step Goal<input id="settingsStepGoal" inputmode="numeric" placeholder="8000"></label>
+          <label class="toggle-line"><input id="settingsMockBridge" type="checkbox"> Mock bridge for testing</label>
+          <button id="saveSettings">Save Settings</button>
+          <button id="syncWatchSettings" type="button">Sync Watch Now</button>
+        </div>
+        <div class="stat-list">
+          <div><span>Weather</span><b id="settingsWeatherStatus">Not synced</b></div>
+          <div><span>Fitness</span><b id="settingsFitnessStatus">Not synced</b></div>
+          <div><span>Bridge Test</span><b id="settingsMockStatus">Real BLE</b></div>
+        </div>
+        <button id="syncWeatherWatch">Sync Live Weather</button>
+        <button id="syncFitnessWatch" type="button">Sync Fitness</button>
+      </section>
+
+      <section class="panel" id="debugPanel" hidden>
+        <div class="panel-head">
+          <button class="back">‹</button>
+          <h1>Debug</h1>
+        </div>
+        <div class="debug-grid">
+          <p><span>Bridge</span><b id="debugBridge">Offline</b></p>
+          <p><span>GPS</span><b id="debugGps">Idle</b></p>
+          <p><span>Last command</span><b id="debugCommand">None</b></p>
+          <p><span>Map</span><b id="debugMap">Loading</b></p>
+        </div>
+        <pre id="debugLog" class="debug-log">Waiting for native service events...</pre>
+      </section>
+
+      <button class="home-button" id="homeButton" aria-label="home"></button>
+    </section>
+  </main>
+
+  <script src="map-data/snazzy-gta5-style.js?v=19"></script>
+  <script src="map-data/lewiston-style-map.js?v=19"></script>
+  <script src="app.js?v=22"></script>
+</body>
+</html>

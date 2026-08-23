@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GTA-Nav Watch Map Preview</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #050505;
+      --road-hi: #bebebe;
+      --road-mid: #aeaeae;
+      --road-low: #777777;
+      --water: #7088b0;
+      --park: #788c40;
+      --block: #1d1d1d;
+      --text: #fff4cb;
+      --green: #79b86a;
+      --blue: #4d7aa3;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      gap: 24px;
+      background: #111;
+      color: var(--text);
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    main {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 28px;
+      padding: 28px;
+    }
+
+    section {
+      display: grid;
+      gap: 10px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+
+    canvas {
+      background: #000;
+      image-rendering: pixelated;
+      box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section>
+      <h1>Close Radar 410 x 502</h1>
+      <canvas id="mini" width="410" height="502"></canvas>
+    </section>
+    <section>
+      <h1>Wide Mini 410 x 502</h1>
+      <canvas id="wide" width="410" height="502"></canvas>
+    </section>
+  </main>
+  <script src="gta-phone-dashboard/map-data/lewiston-style-map.js"></script>
+  <script>
+    const data = window.GTA_NAV_MAP_DATA;
+    const center = data.center;
+    const metersPerLon = 111320 * Math.cos(center.lat * Math.PI / 180);
+    const style = {
+      bg: "#000000",
+      block: "#1d1d1d",
+      roadHi: "#bebebe",
+      roadMid: "#aeaeae",
+      roadLow: "#777777",
+      water: "#7088b0",
+      park: "#788c40",
+      route: "#b079ff",
+      text: "#fff4cb",
+    };
+
+    function project(lat, lon, rect, ppm) {
+      const east = (lon - center.lon) * metersPerLon;
+      const south = (center.lat - lat) * 111320;
+      return {
+        x: rect.x + rect.w / 2 + east * ppm,
+        y: rect.y + rect.h / 2 + south * ppm,
+      };
+    }
+
+    function roadColor(weight) {
+      if (weight >= 6) return style.roadHi;
+      if (weight >= 4) return style.roadMid;
+      return style.roadLow;
+    }
+
+    function roadWidth(weight, wide) {
+      if (wide) return weight >= 6 ? 5 : weight >= 4 ? 4 : 2;
+      return weight >= 6 ? 11 : weight >= 4 ? 8 : weight >= 3 ? 5 : 3;
+    }
+
+    function drawFeature(ctx, feature, rect, ppm, fill) {
+      if (!feature.points || feature.points.length < 2) return;
+      ctx.beginPath();
+      feature.points.forEach(([lat, lon], index) => {
+        const p = project(lat, lon, rect, ppm);
+        if (index === 0) ctx.moveTo(p.x, p.y);
+        else ctx.lineTo(p.x, p.y);
+      });
+      if (fill) {
+        ctx.closePath();
+        ctx.fillStyle = fill;
+        ctx.fill();
+        ctx.strokeStyle = "#000";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+    }
+
+    function drawRoad(ctx, feature, rect, ppm, wide) {
+      const points = feature.points || [];
+      if (points.length < 2) return;
+      const width = roadWidth(feature.weight, wide);
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      for (const pass of [width + (wide ? 3 : 4), width]) {
+        ctx.beginPath();
+        points.forEach(([lat, lon], index) => {
+          const p = project(lat, lon, rect, ppm);
+          if (index === 0) ctx.moveTo(p.x, p.y);
+          else ctx.lineTo(p.x, p.y);
+        });
+        ctx.strokeStyle = pass === width ? roadColor(feature.weight) : "#000";
+        ctx.lineWidth = pass;
+        ctx.stroke();
+      }
+    }
+
+    function player(ctx, x, y, heading = 0, small = true) {
+      const rad = heading * Math.PI / 180;
+      const tip = small ? 16 : 24;
+      const wing = small ? 10 : 16;
+      const tail = small ? 6 : 8;
+      const p = (dist, angle) => ({
+        x: x + Math.sin(rad + angle) * dist,
+        y: y - Math.cos(rad + angle) * dist,
+      });
+      const a = p(tip, 0);
+      const b = p(wing, 2.45);
+      const c = p(tail, Math.PI);
+      const d = p(wing, -2.45);
+      ctx.lineJoin = "round";
+      ctx.fillStyle = "#fff";
+      ctx.strokeStyle = "#050505";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.lineTo(c.x, c.y);
+      ctx.lineTo(d.x, d.y);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    function clipCircle(ctx, rect) {
+      ctx.beginPath();
+      ctx.arc(rect.x + rect.w / 2, rect.y + rect.h / 2, rect.w / 2, 0, Math.PI * 2);
+      ctx.clip();
+    }
+
+    function drawFrame(ctx, rect) {
+      const cx = rect.x + rect.w / 2;
+      const cy = rect.y + rect.h / 2;
+      const r = rect.w / 2;
+      ctx.lineWidth = 5;
+      ctx.strokeStyle = "#000";
+      ctx.beginPath();
+      ctx.arc(cx, cy, r - 2, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.lineWidth = 7;
+      ctx.strokeStyle = "#79b86a";
+      ctx.beginPath();
+      ctx.arc(cx, cy, r - 8, 0.62 * Math.PI, 1.68 * Math.PI);
+      ctx.stroke();
+      ctx.strokeStyle = "#4d7aa3";
+      ctx.beginPath();
+      ctx.arc(cx, cy, r - 8, -0.32 * Math.PI, 0.62 * Math.PI);
+      ctx.stroke();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "#000";
+      ctx.beginPath();
+      ctx.arc(cx, cy, r - 14, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    function drawMap(canvas, wide) {
+      const ctx = canvas.getContext("2d");
+      const rect = wide ? { x: 8, y: 82, w: 394, h: 262 } : { x: 10, y: 48, w: 390, h: 390 };
+      const ppm = wide ? 2.15 : 2.75;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.save();
+      if (!wide) clipCircle(ctx, rect);
+      ctx.fillStyle = style.bg;
+      ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+      data.features.filter(f => f.kind === "water").forEach(f => drawFeature(ctx, f, rect, ppm, style.water));
+      data.features.filter(f => f.kind === "land").forEach(f => drawFeature(ctx, f, rect, ppm, style.park));
+      data.features.filter(f => f.kind === "road").slice(0, 1400).forEach(f => drawRoad(ctx, f, rect, ppm, wide));
+      player(ctx, rect.x + rect.w / 2, rect.y + rect.h / 2, 0, !wide);
+      ctx.restore();
+      if (!wide) {
+        drawFrame(ctx, rect);
+      } else {
+        ctx.strokeStyle = "#000";
+        ctx.lineWidth = 3;
+        ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
+        ctx.fillStyle = "#79b86a";
+        ctx.fillRect(rect.x + 20, rect.y + rect.h - 28, rect.w - 72, 10);
+        player(ctx, rect.x + rect.w / 2, rect.y + rect.h / 2, 0, false);
+      }
+    }
+
+    drawMap(document.querySelector("#mini"), false);
+    drawMap(document.querySelector("#wide"), true);
+  </script>
+</body>
+</html>
