@@ -1612,23 +1612,11 @@ void drawWideMapHud() {
 
   const int top = 46;
   const int bottom = LCD_HEIGHT - 30;
-  gfx->fillRect(0, top, LCD_WIDTH, bottom - top, 0x8C92);
-  gfx->fillRect(0, top, LCD_WIDTH, 58, 0x7BEF);
-  gfx->fillRect(0, bottom - 72, LCD_WIDTH, 72, 0x5AEB);
-
-  drawWideBlock(12, 92, 118, 78, 164, 150, 38, 168, 0x31A6, 0x9CF3);
-  drawWideBlock(202, 72, 314, 60, 286, 148, 182, 164, 0x2965, 0x94B2);
-  drawWideBlock(318, 88, 400, 114, 376, 212, 282, 178, 0x3186, 0xA514);
-  drawWideBlock(22, 210, 132, 190, 156, 306, 46, 336, 0x2945, 0x8C71);
-  drawWideBlock(226, 214, 398, 186, 384, 356, 216, 354, 0x2965, 0x9CF3);
-
-  drawWideRoad(196, bottom - 18, 204, 50, 34, 0xCE79);
-  drawWideRoad(40, bottom - 70, 374, 88, 28, 0xC638);
-  drawWideRoad(4, 248, 396, 236, 24, 0xBDF7);
-  drawWideRoad(52, 126, 370, 320, 21, 0xBDF7);
-  drawWideRoad(272, 60, 226, bottom - 22, 22, 0xBDF7);
-  drawWideRoad(104, 74, 92, 350, 18, 0xA514);
-  drawWideRoad(324, 132, 398, 174, 17, 0xA514);
+  gfx->fillRect(0, top, LCD_WIDTH, bottom - top, COL_BLACK);
+  drawMapBitmapChunked(GTA_MAP_WATCH_CLOSE, GTA_MAP_WATCH_CLOSE_W, GTA_MAP_WATCH_CLOSE_H, 0, top);
+  if (bottom > top + GTA_MAP_WATCH_CLOSE_H) {
+    gfx->fillRect(0, top + GTA_MAP_WATCH_CLOSE_H, LCD_WIDTH, bottom - top - GTA_MAP_WATCH_CLOSE_H, COL_BLACK);
+  }
 
   if (destinationGps.valid || routeToParking || strlen(trip.destination) > 0) {
     drawWideRouteLine(204, bottom - 74, 206, 258);
@@ -1716,7 +1704,7 @@ void drawMapScreen() {
   int mapX = 0, mapY = 0, mapW = 0, mapH = 0;
   currentRadarRect(mapX, mapY, mapW, mapH);
   int panelY = mapY + mapH;
-  drawLewistonOsmMap(mapX, mapY, mapW, mapH);
+  drawLiveGtaBitmapMap(mapY, panelY);
 
   drawDestinationRoute(mapY, panelY);
   drawCustomPlaces(mapY, panelY);
@@ -2263,13 +2251,14 @@ void drawMechanicScreen() {
 
 void drawLauncherStatusBar() {
   gfx->fillRect(0, 0, LCD_WIDTH, 58, COL_BLACK);
-  gfx->fillCircle(30, 30, 3, bleConnected ? COL_SAFE : COL_ROUTE);
-  printAt(42, 20, bleConnected ? "PHONE" : "PAIR", bleConnected ? COL_SAFE : COL_ROUTE, 1);
-  printAt(160, 18, bridgeTimeText(false), COL_TEXT, 2);
-  gfx->drawRect(328, 19, 34, 16, COL_TEXT);
-  gfx->fillRect(363, 24, 4, 6, COL_TEXT);
+  printAt(16, 18, bridgeTimeText(false), COL_TEXT, 2);
+  printAt(164, 20, "GTA-NAV", COL_SAFE, 2);
+  gfx->fillCircle(316, 28, 3, bleConnected ? COL_SAFE : COL_ROUTE);
+  printAt(328, 22, bleConnected ? "ON" : "PAIR", bleConnected ? COL_SAFE : COL_ROUTE, 1);
+  gfx->drawRect(368, 21, 28, 14, COL_TEXT);
+  gfx->fillRect(397, 25, 3, 6, COL_TEXT);
   int fillW = constrain(watch.getPhoneBattery(), 0, 100) * 28 / 100;
-  gfx->fillRect(331, 22, fillW, 10, watch.isPhoneCharging() ? COL_SAFE : COL_TEXT);
+  gfx->fillRect(371, 24, fillW, 8, watch.isPhoneCharging() ? COL_SAFE : COL_TEXT);
 }
 
 void drawIconMask(int x, int y, const uint8_t *mask, uint16_t color) {
@@ -2404,10 +2393,12 @@ void drawLauncherIconArt(int cx, int cy, Screen target, uint16_t accent) {
 
 void drawLauncherIcon(int x, int y, const char *label, Screen target, uint16_t fill, uint16_t accent) {
   (void)fill;
-  gfx->fillCircle(x + 66, y + 54, 48, 0x0841);
-  drawLauncherIconArt(x + 66, y + 54, target, accent);
+  gfx->fillRect(x + 10, y, 112, 82, 0x0841);
+  gfx->drawRect(x + 10, y, 112, 82, accent);
+  gfx->drawRect(x + 13, y + 3, 106, 76, accent);
+  drawLauncherIconArt(x + 66, y + 41, target, accent);
   int labelX = x + 66 - (strlen(label) * 12) / 2;
-  printAt(max(0, labelX), y + 112, label, COL_TEXT, 2);
+  printAt(max(0, labelX), y + 94, label, COL_TEXT, 2);
 }
 
 void drawLauncherScreen() {
