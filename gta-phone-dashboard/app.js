@@ -1403,12 +1403,19 @@ function gtaMockBridgeEnabled() {
   return Boolean(appSettings.mockBridge);
 }
 
-function rememberCommand(command, mode = "mock") {
-  commandHistory.unshift({ command, mode, sentAt: Date.now() });
-  commandHistory = commandHistory.slice(0, 80);
-  localStorage.setItem("gtaNavCommandHistory", JSON.stringify(commandHistory));
-  updateDebugSnapshot();
-}
+  function rememberCommand(command, mode = "mock") {
+    const event = { command, mode, sentAt: Date.now() };
+    commandHistory.unshift(event);
+    commandHistory = commandHistory.slice(0, 80);
+    localStorage.setItem("gtaNavCommandHistory", JSON.stringify(commandHistory));
+    localStorage.setItem("gtaNavLastWatchCommand", JSON.stringify(event));
+    if (window.BroadcastChannel) {
+      const channel = new BroadcastChannel("gta-nav-watch");
+      channel.postMessage(event);
+      channel.close();
+    }
+    updateDebugSnapshot();
+  }
 
 async function mockSendCommand(command) {
   lastGpsCommand = command;
@@ -2551,10 +2558,13 @@ document.querySelector("#routeParked").addEventListener("click", routeParkedLoca
 document.querySelector("#speakMechanic").addEventListener("click", speakMechanicLine);
 document.querySelector("#openCamera").addEventListener("click", openCamera);
 document.querySelector("#snapPhoto").addEventListener("click", snapPhoto);
-document.querySelector("#copyCommand").addEventListener("click", async () => {
-  await navigator.clipboard.writeText(lastGpsCommand || document.querySelector("#commandBox").value);
-});
-document.querySelector("#saveSettings").addEventListener("click", saveAppSettings);
+    document.querySelector("#copyCommand").addEventListener("click", async () => {
+      await navigator.clipboard.writeText(lastGpsCommand || document.querySelector("#commandBox").value);
+    });
+    document.querySelector("#openWatchSim").addEventListener("click", () => {
+      window.open("./watch-sim/", "_blank", "noopener");
+    });
+    document.querySelector("#saveSettings").addEventListener("click", saveAppSettings);
 document.querySelector("#syncWatchSettings").addEventListener("click", syncWatchSettings);
 document.querySelector("#syncCalendarWatch").addEventListener("click", syncWatchSettings);
 document.querySelector("#linkPhoneCalendar").addEventListener("click", linkPhoneCalendar);

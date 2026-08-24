@@ -29,6 +29,7 @@ chronos-esp32/.git/
 *.factory.bin
 *.zip
 *.tar.gz
+gta-phone-dashboard/watch-sim/*.png
 
 # OS/editor noise
 .DS_Store
