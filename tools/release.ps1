@@ -30,7 +30,8 @@ $g = $g -replace 'versionCode = \d+', "versionCode = $code" -replace 'versionNam
 Set-FileText $gradle $g
 Write-Host "version $Version (app versionCode $code)"
 
-# ---- build
+# ---- build (compilers write warnings to stderr: judge success by exit code)
+$ErrorActionPreference = "Continue"
 $env:PLATFORMIO_CORE_DIR = "$root\.pio"
 Push-Location "$root\firmware"
 & "$root\tools\pio-venv\Scripts\pio.exe" run | Select-String 'SUCCESS|FAILED|error'
@@ -38,11 +39,12 @@ if ($LASTEXITCODE -ne 0) { throw "firmware build failed" }
 Pop-Location
 $env:JAVA_HOME = "G:\Android\jdk"; $env:GRADLE_USER_HOME = "G:\Android\gradle"; $env:ANDROID_HOME = "G:\Android\sdk"
 Push-Location "$root\android"
-.\gradlew.bat assembleRelease --console=plain -q
+.\gradlew.bat assembleRelease --console=plain -q 2>&1 | Select-String "^e: |FAILED"
 if ($LASTEXITCODE -ne 0) { throw "app build failed" }
 Pop-Location
 
 # ---- package
+$ErrorActionPreference = "Stop"
 $out = "$root\build-tmp\release-v$Version"
 New-Item -ItemType Directory -Force $out | Out-Null
 Get-ChildItem $out | Remove-Item

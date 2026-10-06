@@ -244,12 +244,21 @@ class BleLink(private val ctx: Context, private val listener: Listener) {
         }
         val p = packets!!.poll() ?: return
         writeInFlight = true
-        val ok = if (Build.VERSION.SDK_INT >= 33) {
-            g.writeCharacteristic(c, p, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) == BluetoothGatt.GATT_SUCCESS
-        } else @Suppress("DEPRECATION") {
-            c.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-            c.value = p
-            g.writeCharacteristic(c)
+        val ok = try {
+            if (Build.VERSION.SDK_INT >= 33) {
+                g.writeCharacteristic(c, p, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) == BluetoothGatt.GATT_SUCCESS
+            } else @Suppress("DEPRECATION") {
+                c.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                c.value = p
+                g.writeCharacteristic(c)
+            }
+        } catch (e: Exception) {
+            // never let a stack error take the app down: drop this message and carry on
+            Store.addLog("write rejected: ${e.message}")
+            writeInFlight = false
+            packets = null
+            main.post { pump() }
+            return
         }
         if (!ok) {
             // stack busy: retry shortly with the same packet

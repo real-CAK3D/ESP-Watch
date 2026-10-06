@@ -36,9 +36,12 @@ object Protocol {
     const val LOG = 0x83
     const val OTA_STATUS = 0x84
 
-    /** Splits a message into BLE packets of at most [mtu]-3 bytes: [type][flags][payload...]. */
+    /** Android rejects (throws on) any single attribute write longer than 512 bytes, whatever the MTU. */
+    const val MAX_ATT_WRITE = 512
+
+    /** Splits a message into BLE packets of at most min(mtu-3, 512) bytes: [type][flags][payload...]. */
     fun packetize(type: Int, payload: ByteArray, mtu: Int): List<ByteArray> {
-        val chunk = (mtu - 3 - 2).coerceAtLeast(18)
+        val chunk = (minOf(mtu - 3, MAX_ATT_WRITE) - 2).coerceAtLeast(18)
         val out = ArrayList<ByteArray>()
         var off = 0
         do {

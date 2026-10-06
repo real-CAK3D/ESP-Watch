@@ -424,6 +424,8 @@ void placeIcon(int &used, float wx, float wy, float cs, float sn, const char *ki
   if (used >= ICON_POOL) return;
   float sx, sy;
   toScreen(wx, wy, cs, sn, sx, sy);
+  // standing on a saved place: the player arrow wins, like GTA hides a blip you're on top of
+  if (hypotf(sx - PLAYER_X, sy - PLAYER_Y) < 30) return;
   const float m = 26;
   // keep blips out from under the turn card while navigating
   const float top = app.nav.active ? MAP_Y0 + 150 : MAP_Y0 + m;
