@@ -40,7 +40,15 @@ static volatile bool injPressed = false;
 
 static int batPct = -1, batMv = 0;
 static bool isCharging = false, isUsb = false;
-static bool bootEdge = false, pwrEdge = false;
+static bool bootEdge = false, pwrEdge = false, usbEdge = false, fullEdge = false;
+static bool chargeDone = false;
+static bool powerSaver = false, raiseToWake = true;
+static uint32_t rampStartMs = 0;
+static float accX = 0, accY = 0, accZ = 0;
+// charge-rate tracking for the "full in N min" estimate
+static uint32_t chgRefMs = 0;
+static int chgRefPct = -1;
+static int chgEtaMin = -1;
 static int32_t tzOffsetSec = 0;
 static Preferences prefs;
 
@@ -211,12 +219,36 @@ bool begin() {
   return true;
 }
 
+// Raise-to-wake: wrist was hanging or tilted away (screen not facing up), then turns face-up and holds.
+static void pollRaise(float ax, float ay, float az) {
+  static float zLp = 0;
+  static uint32_t awayMs = 0, upSinceMs = 0;
+  zLp += (az - zLp) * 0.3f;
+  uint32_t now = millis();
+  if (zLp < 0.35f) awayMs = now;  // screen pointing sideways/down
+  bool faceUp = zLp > 0.75f && fabsf(ax) < 0.55f;
+  if (!faceUp) {
+    upSinceMs = 0;
+    return;
+  }
+  if (!upSinceMs) upSinceMs = now;
+  // turned up within the last 1.2 s and held for 150 ms
+  if (raiseToWake && !screenOnState && now - awayMs < 1200 && now - upSinceMs > 150) {
+    hal::screenOn(true);
+    awayMs = 0;
+  }
+}
+
 static void pollSteps() {
   static uint32_t lastSample = 0;
   if (!imuOk || millis() - lastSample < 20) return;
   lastSample = millis();
   float ax, ay, az;
   if (!imu.getAccelerometer(ax, ay, az)) return;
+  accX = ax;
+  accY = ay;
+  accZ = az;
+  pollRaise(ax, ay, az);
   float mag = sqrtf(ax * ax + ay * ay + az * az);
   accLp += (mag - accLp) * 0.35f;       // smooth
   accBase += (accLp - accBase) * 0.02f;  // slow baseline (~1g)
@@ -240,18 +272,52 @@ static void pollPower() {
   pmu.clearIrqStatus();
 
   static uint32_t lastBat = 0;
-  if (millis() - lastBat > 5000 || batPct < 0) {
+  if (millis() - lastBat > 1000 || batPct < 0) {
     lastBat = millis();
-    isUsb = pmu.isVbusIn();
+    bool usb = pmu.isVbusIn();
+    if (usb && !isUsb && batPct >= 0) usbEdge = true;
+    isUsb = usb;
     isCharging = pmu.isCharging();
     batMv = pmu.getBattVoltage();
     batPct = pmu.isBatteryConnect() ? pmu.getBatteryPercent() : -1;
+    bool done = isUsb && !isCharging && batPct >= 99;
+    if (done && !chargeDone) fullEdge = true;
+    chargeDone = done;
+
+    // time-to-full from the charge rate over the last few minutes
+    if (!isCharging || batPct < 0) {
+      chgRefPct = -1;
+      chgEtaMin = -1;
+    } else if (chgRefPct < 0) {
+      chgRefPct = batPct;
+      chgRefMs = millis();
+    } else if (batPct > chgRefPct) {
+      float minutes = (millis() - chgRefMs) / 60000.0f;
+      if (minutes > 2) chgEtaMin = (int)((100 - batPct) * minutes / (batPct - chgRefPct) + 0.5f);
+      if (minutes > 15) {  // slide the window so the estimate follows the CC/CV curve
+        chgRefPct = batPct;
+        chgRefMs = millis();
+      }
+    }
   }
 }
+
+static uint8_t effectiveBrightness() { return powerSaver ? min<uint8_t>(brightnessLevel, 90) : brightnessLevel; }
 
 void loop() {
   pollPower();
   pollSteps();
+
+  // fade the panel in after waking (looks like a real watch instead of a hard switch-on)
+  if (rampStartMs && screenOnState) {
+    uint32_t t = millis() - rampStartMs;
+    if (t >= 180) {
+      gfx->setBrightness(effectiveBrightness());
+      rampStartMs = 0;
+    } else {
+      gfx->setBrightness((uint8_t)(effectiveBrightness() * t / 180));
+    }
+  }
 
   static bool bootWasDown = false;
   bool bootDown = digitalRead(PIN_BOOT) == LOW;
@@ -280,8 +346,9 @@ void screenOn(bool on) {
   screenOnState = on;
   if (on) {
     setCpuFrequencyMhz(240);
+    gfx->setBrightness(0);
     gfx->displayOn();
-    gfx->setBrightness(brightnessLevel);
+    rampStartMs = millis() | 1;
     lastActivityMs = millis();
     lv_obj_invalidate(lv_screen_active());
   } else {
@@ -295,10 +362,35 @@ bool screenIsOn() { return screenOnState; }
 
 void setBrightness(uint8_t level) {
   brightnessLevel = max<uint8_t>(level, 10);
-  if (screenOnState) gfx->setBrightness(brightnessLevel);
+  if (screenOnState) gfx->setBrightness(effectiveBrightness());
   prefs.putUChar("bright", brightnessLevel);
 }
 uint8_t brightness() { return brightnessLevel; }
+
+void setPowerSaver(bool on) {
+  if (on == powerSaver) return;
+  powerSaver = on;
+  if (screenOnState) gfx->setBrightness(effectiveBrightness());
+}
+bool powerSaverOn() { return powerSaver; }
+void setRaiseToWake(bool on) { raiseToWake = on; }
+bool takeUsbPlugged() {
+  bool e = usbEdge;
+  usbEdge = false;
+  return e;
+}
+bool takeChargeFull() {
+  bool e = fullEdge;
+  fullEdge = false;
+  return e;
+}
+bool chargeComplete() { return chargeDone; }
+int chargeEtaMinutes() { return chgEtaMin; }
+void accel(float &x, float &y, float &z) {
+  x = accX;
+  y = accY;
+  z = accZ;
+}
 void noteActivity() { lastActivityMs = millis(); }
 uint32_t idleMs() { return millis() - lastActivityMs; }
 

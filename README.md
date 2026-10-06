@@ -32,10 +32,19 @@ docs/       Protocol spec
 | PWR button | press | screen on/off |
 
 The minimap is heading-up like GTA: the white arrow is you, roads/water/parks are real
-OpenStreetMap data streamed from the phone, the purple line is your GPS route, the green ring
-is the watch battery (health) and the blue ring the phone battery (armor). The "N" badge orbits
-the frame to show north. While navigating, the turn card shows the next maneuver, distance,
-ETA, remaining distance and gas cost; the watch wakes itself up before each turn.
+OpenStreetMap data streamed from the phone, hills are shaded from real elevation data, the purple
+line is your GPS route, the green ring is the watch battery (health) and the blue ring the phone
+battery (armor). The "N" badge orbits the frame to show north. While navigating, the turn card
+shows the next maneuver, distance, ETA, remaining distance, gas cost and the time; the watch wakes
+itself up before each turn.
+
+**Charging & battery:** plugging in shows a charging screen with the percentage and time to full.
+Below 20% / 10% / 5% the watch warns you (and the phone, if enabled); below 15% power saver dims the
+screen and shortens the timeout. Raise your wrist to wake the screen (toggle in quick settings).
+
+**Updates:** new versions are published on the Releases page. The phone app checks it, updates
+itself, and sends new watch firmware over Bluetooth (about a minute; the watch shows progress and
+restarts). USB flashing still works as before.
 
 ## Phone app
 
@@ -45,14 +54,29 @@ Install `GTA-Watch.apk` from the latest release (debug-signed, for sideloading; 
   waypoint, then Drive / Walk.
 - **Places** – add GTA blips (Safe House, Mechanic, Pay 'n' Spray, Cluckin' Bell…) from your
   location or an address. They appear on the watch and can be routed to from the wrist.
-- **Watch** – pair, link status + signal bars, live telemetry from the watch, settings
-  (clock, units, timeout, brightness, mpg + gas price), permissions, link log.
+- **Watch** – pair through Android's companion pairing sheet (the same system Galaxy Wearable
+  uses, so the link survives in the background), link status + signal bars, battery with a 24 h
+  charge chart, telemetry, updates, link log, and a crash report if the app ever crashed.
+- **Settings** – map style (GTA *Road* pause map or GTA *Atlas*), terrain on phone / watch, watch
+  radar zoom, watch face, raise to wake, spoken turn directions, fuel economy + gas price, charge and
+  low-battery alerts, permissions, updates.
+
+The **Map** tab also has a GTA-style legend (list button on the right) of the blips on your map.
 
 For a link that survives the screen being off: allow notification access, "Display over other
 apps", and set the app's battery mode to *Unrestricted*.
 
 Data sources (free, no API keys): OpenStreetMap via Overpass (watch map), OpenFreeMap tiles
-(phone map), OSRM (routes), Nominatim (search), Open-Meteo (weather).
+(phone map), AWS Terrain Tiles (hill shading), OSRM (routes), Nominatim (search), Open-Meteo (weather).
+
+## Publishing a release
+
+```powershell
+cd G:\GTA-Watch\tools
+.\release.ps1 -Version 2.2.0 -Notes ..\docs\release-notes\v2.2.0.md
+```
+Bumps the firmware and app versions, builds both, packages the watch images + APK + checksums,
+commits, tags, pushes and creates the GitHub release that the app's updater looks for.
 
 ## Building
 

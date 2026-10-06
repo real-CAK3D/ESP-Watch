@@ -7,6 +7,8 @@ app (android/.../MapPacker.kt, Navigator.kt) mirrors.
   python phonesim.py drive LAT LON DLAT DLON     route there and simulate the trip
   python phonesim.py walk  LAT LON DLAT DLON     same, walking
   python phonesim.py demo                        weather, places, notification, time
+  python phonesim.py terrain LAT LON             push the hill-shade grid
+  python phonesim.py ota firmware.bin [VERSION]  firmware update over the BLE message path
 """
 import json
 import math
@@ -406,6 +408,87 @@ def simulate(w, lat, lon, dlat, dlon, walking, speed=None, shots_every=0):
     jmsg(w, MSG_NAV, {"active": False})
 
 
+# ---------------------------------------------------------------- terrain (hill shading)
+MSG_TERRAIN = 0x0D
+TERRAIN_URL = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
+
+
+def _tile_xy(lat, lon, z):
+    n = 2 ** z
+    x = (lon + 180) / 360 * n
+    y = (1 - math.asinh(math.tan(math.radians(lat))) / math.pi) / 2 * n
+    return x, y
+
+
+def build_terrain(lat0, lon0, radius=1600, n=128, z=13, sun_az=315.0, sun_alt=45.0, exaggerate=2.5):
+    """Hill-shade grid (n x n u8, 128 = flat) centred on lat0/lon0, from AWS Terrain Tiles (terrarium)."""
+    from io import BytesIO
+
+    from PIL import Image
+    cell = 2 * radius / n
+    ml = m_lon(lat0)
+    tiles = {}
+
+    def elev(lat, lon):
+        fx, fy = _tile_xy(lat, lon, z)
+        tx, ty = int(fx), int(fy)
+        if (tx, ty) not in tiles:
+            req = urllib.request.Request(TERRAIN_URL.format(z=z, x=tx, y=ty), headers=UA)
+            with urllib.request.urlopen(req, timeout=30) as r:
+                tiles[(tx, ty)] = Image.open(BytesIO(r.read())).convert("RGB").load()
+        px = tiles[(tx, ty)]
+        r, g, b = px[min(255, int((fx - tx) * 256)), min(255, int((fy - ty) * 256))]
+        return r * 256 + g + b / 256 - 32768
+
+    # elevation on a grid one cell larger on each side (for the slope at the edges)
+    E = [[elev(lat0 + (radius - (j - 0.5) * cell) / M_LAT, lon0 + (-radius + (i - 0.5) * cell) / ml)
+          for i in range(n + 2)] for j in range(n + 2)]
+    az, alt = math.radians(sun_az), math.radians(sun_alt)
+    flat = math.sin(alt)
+    out = bytearray()
+    for j in range(1, n + 1):
+        for i in range(1, n + 1):
+            dzdx = (E[j][i + 1] - E[j][i - 1]) / (2 * cell) * exaggerate
+            dzdy = (E[j - 1][i] - E[j + 1][i]) / (2 * cell) * exaggerate  # north is up (row 0)
+            slope = math.atan(math.hypot(dzdx, dzdy))
+            aspect = math.atan2(-dzdx, -dzdy)  # downhill direction, clockwise from north
+            hs = math.sin(alt) * math.cos(slope) + math.cos(alt) * math.sin(slope) * math.cos(az - aspect)
+            out.append(max(0, min(255, int(128 + (hs - flat) * 255))))
+    head = struct.pack("<iiHH", round(lat0 * 1e7), round(lon0 * 1e7), n, round(cell * 10))
+    return head + bytes(out)
+
+
+def push_terrain(w, lat, lon):
+    t0 = time.time()
+    blob = build_terrain(lat, lon)
+    print(f"terrain: {len(blob)} bytes in {time.time() - t0:.1f}s ->", w.msg(MSG_TERRAIN, blob))
+
+
+# ---------------------------------------------------------------- firmware update (same path as BLE OTA)
+MSG_OTA_BEGIN, MSG_OTA_DATA, MSG_OTA_END = 0x10, 0x11, 0x12
+
+
+def ota(w, path, version="dev", block=8192):
+    img = open(path, "rb").read()
+    print(f"OTA {path}: {len(img)} bytes")
+    jmsg(w, MSG_OTA_BEGIN, {"size": len(img), "ver": version})
+    st = w.wait_json("[tx] 84 ", timeout=60)
+    if st.get("st") != "ready":
+        raise RuntimeError(st)
+    off = 0
+    t0 = time.time()
+    while off < len(img):
+        w.msg(MSG_OTA_DATA, struct.pack("<I", off) + img[off:off + block])
+        st = w.wait_json("[tx] 84 ", timeout=20)
+        if st.get("st") != "ack":
+            raise RuntimeError(st)
+        off = st["off"]
+        print("\r" + f"  {off * 100 // len(img)}%  {off / max(time.time() - t0, 0.1) / 1024:.0f} KB/s", end="", flush=True)
+    print()
+    w.msg(MSG_OTA_END, b"")
+    print("result:", w.wait_json("[tx] 84 ", timeout=30))
+
+
 def demo(w):
     push_time(w)
     jmsg(w, MSG_WEATHER, {"city": "Lewiston", "t": 58, "hi": 63, "lo": 44, "feels": 55, "hum": 62, "wind": 8,
@@ -435,6 +518,10 @@ def main():
         simulate(w, *map(float, a[1:5]), walking=a[0] == "walk", shots_every=int(a[5]) if len(a) > 5 else 0)
     elif a[0] == "demo":
         demo(w)
+    elif a[0] == "terrain":
+        push_terrain(w, float(a[1]), float(a[2]))
+    elif a[0] == "ota":
+        ota(w, a[1], a[2] if len(a) > 2 else "dev")
 
 
 if __name__ == "__main__":

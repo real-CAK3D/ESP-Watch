@@ -74,6 +74,10 @@ struct Settings {
   bool metric = false;
   uint16_t timeoutSec = 15;
   bool keepOnNav = true;
+  uint8_t radarZoom = 1;  // 0 close, 1 normal, 2 far
+  bool terrain = true;    // hill shading on the minimap
+  bool raiseToWake = true;
+  uint8_t face = 0;       // 0 digital, 1 analog
 };
 
 struct AppState {
@@ -93,6 +97,7 @@ struct AppState {
   bool phoneCharging = false;
   bool connected = false;
   uint32_t mapSeq = 0;  // bumps when map data or route changes
+  uint32_t settingsSeq = 0;
 };
 
 extern AppState app;
@@ -100,6 +105,7 @@ extern AppState app;
 namespace state {
 void begin();  // restores places/settings from flash
 void handleMessage(uint8_t type, const uint8_t *data, size_t len);
+void saveSettings();
 const char *weatherIcon(int wmoCode);
 const char *weatherText(int wmoCode);
 const char *placeIcon(const char *kind);

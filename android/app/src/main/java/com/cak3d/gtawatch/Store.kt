@@ -49,9 +49,19 @@ data class NavUi(
 data class Fix(val lat: Double, val lon: Double, val heading: Float, val speed: Float, val accuracy: Float, val street: String, val area: String)
 
 data class Settings(
+    // watch
     val h24: Boolean = false, val metric: Boolean = false, val screenTimeout: Int = 15, val brightness: Int = 200,
-    val mpg: Double = 25.0, val gasPrice: Double = 3.29, val forwardNotifications: Boolean = true,
-    val walkDefault: Boolean = false,
+    val radarZoom: Int = 1, val watchTerrain: Boolean = true, val raiseToWake: Boolean = true, val watchFace: Int = 0,
+    val keepMapOn: Boolean = true,
+    // phone map
+    val mapStyle: Int = 0,  // 0 = GTA road (dark pause map), 1 = GTA atlas
+    val phoneTerrain: Boolean = true,
+    // navigation
+    val mpg: Double = 25.0, val gasPrice: Double = 3.29, val walkDefault: Boolean = false, val voice: Boolean = false,
+    // alerts
+    val forwardNotifications: Boolean = true, val chargeAlerts: Boolean = true, val lowBatteryAlerts: Boolean = true,
+    // updates
+    val autoUpdateCheck: Boolean = true,
 )
 
 /** Process-wide state shared by the service and the UI. */
@@ -74,6 +84,11 @@ object Store {
     /** Bumped when the watch asks to open the big map. */
     val openMapRequest = MutableStateFlow(0L)
     val serviceRunning = MutableStateFlow(false)
+    /** Watch battery samples (epoch ms, percent, charging) for the battery chart, newest last. */
+    val batteryHistory = MutableStateFlow<List<Triple<Long, Int, Boolean>>>(emptyList())
+    val update = MutableStateFlow<Updater.Release?>(null)
+    val updateStatus = MutableStateFlow("")
+    val otaProgress = MutableStateFlow(-1)  // 0..100 while updating the watch, -1 idle
 
     var deviceAddress: String?
         get() = prefs.getString("device", null)
@@ -122,15 +137,29 @@ object Store {
         _settings.value = s
         prefs.edit().putString("settings", JSONObject()
             .put("h24", s.h24).put("metric", s.metric).put("timeout", s.screenTimeout).put("bright", s.brightness)
-            .put("mpg", s.mpg).put("gas", s.gasPrice).put("fwd", s.forwardNotifications).put("walk", s.walkDefault)
+            .put("zoom", s.radarZoom).put("wterrain", s.watchTerrain).put("raise", s.raiseToWake).put("face", s.watchFace)
+            .put("keepMap", s.keepMapOn).put("style", s.mapStyle).put("pterrain", s.phoneTerrain)
+            .put("mpg", s.mpg).put("gas", s.gasPrice).put("walk", s.walkDefault).put("voice", s.voice)
+            .put("fwd", s.forwardNotifications).put("chg", s.chargeAlerts).put("low", s.lowBatteryAlerts)
+            .put("upd", s.autoUpdateCheck)
             .toString()).apply()
     }
 
-    private fun parseSettings(s: String?): Settings = try {
-        val o = JSONObject(s ?: "{}")
+    private fun parseSettings(json: String?): Settings = try {
+        val o = JSONObject(json ?: "{}")
+        val d = Settings()
         Settings(
-            o.optBoolean("h24", false), o.optBoolean("metric", false), o.optInt("timeout", 15), o.optInt("bright", 200),
-            o.optDouble("mpg", 25.0), o.optDouble("gas", 3.29), o.optBoolean("fwd", true), o.optBoolean("walk", false),
+            h24 = o.optBoolean("h24", d.h24), metric = o.optBoolean("metric", d.metric),
+            screenTimeout = o.optInt("timeout", d.screenTimeout), brightness = o.optInt("bright", d.brightness),
+            radarZoom = o.optInt("zoom", d.radarZoom), watchTerrain = o.optBoolean("wterrain", d.watchTerrain),
+            raiseToWake = o.optBoolean("raise", d.raiseToWake), watchFace = o.optInt("face", d.watchFace),
+            keepMapOn = o.optBoolean("keepMap", d.keepMapOn), mapStyle = o.optInt("style", d.mapStyle),
+            phoneTerrain = o.optBoolean("pterrain", d.phoneTerrain),
+            mpg = o.optDouble("mpg", d.mpg), gasPrice = o.optDouble("gas", d.gasPrice),
+            walkDefault = o.optBoolean("walk", d.walkDefault), voice = o.optBoolean("voice", d.voice),
+            forwardNotifications = o.optBoolean("fwd", d.forwardNotifications),
+            chargeAlerts = o.optBoolean("chg", d.chargeAlerts), lowBatteryAlerts = o.optBoolean("low", d.lowBatteryAlerts),
+            autoUpdateCheck = o.optBoolean("upd", d.autoUpdateCheck),
         )
     } catch (e: Exception) {
         Settings()

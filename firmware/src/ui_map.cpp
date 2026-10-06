@@ -7,6 +7,7 @@
 #include "phone.h"
 #include "raster.h"
 #include "state.h"
+#include "terrain.h"
 #include "ui.h"
 #include "ui_common.h"
 
@@ -197,6 +198,38 @@ void drawFeatures(float cs, float sn) {
         if (f.kind == MK_RIVER) c = C_WATER;
         rs.polyline(xy, f.npts, roadWidth(f.kind), c);
       }
+    }
+  }
+}
+
+// Land with hill shading (GTA's radar keeps it subtle). Drawn in 4x4 blocks: ~12k samples a frame.
+uint16_t landShades[32];
+bool landShadesReady = false;
+
+void drawLand(float cs, float sn) {
+  if (!app.settings.terrain || !terrain::has()) {
+    rs.fill(C_LAND);
+    return;
+  }
+  if (!landShadesReady) {
+    const int r0 = 0x4F, g0 = 0x5B, b0 = 0x56;  // C_LAND
+    for (int i = 0; i < 32; i++) {
+      float f = 0.70f + 0.60f * i / 31.0f;  // 0.70 (deep shadow) .. 1.30 (sunlit slope)
+      int r = min(255, (int)(r0 * f)), g = min(255, (int)(g0 * f)), b = min(255, (int)(b0 * f));
+      landShades[i] = rgb565((r << 16) | (g << 8) | b);
+    }
+    landShadesReady = true;
+  }
+  constexpr int B = 4;
+  const float inv = 1.0f / dispScale;
+  for (int by = MAP_Y0; by < MAP_Y1; by += B) {
+    const float b = (PLAYER_Y - (by + B * 0.5f)) * inv;
+    for (int bx = MAP_X0; bx < MAP_X1; bx += B) {
+      const float a = (bx + B * 0.5f - PLAYER_X) * inv;
+      // inverse of toScreen(): screen offset -> world offset
+      const float wx = dispX + a * cs + b * sn;
+      const float wy = dispY - a * sn + b * cs;
+      rs.fillRect(bx, by, B, B, landShades[terrain::sample(wx, wy) >> 3]);
     }
   }
 }
@@ -615,7 +648,9 @@ void tick() {
     float dh = fmodf(g.heading - dispHdg + 540.0f, 360.0f) - 180.0f;
     dispHdg = fmodf(dispHdg + dh * min(1.0f, dt * 4.0f) + 360.0f, 360.0f);
     // speed-adaptive zoom like GTA: zoom out when driving fast
-    float targetScale = g.speed < 3 ? 1.3f : (g.speed > 25 ? 0.6f : 1.3f - (g.speed - 3) / 22.0f * 0.7f);
+    static const float ZOOM[3] = {1.75f, 1.3f, 0.95f};
+    const float base = ZOOM[min<int>(app.settings.radarZoom, 2)];
+    float targetScale = g.speed < 3 ? base : (g.speed > 25 ? base * 0.46f : base * (1.0f - (g.speed - 3) / 22.0f * 0.54f));
     dispScale += (targetScale - dispScale) * min(1.0f, dt * 1.5f);
     moving = hypotf(tx - dispX, ty - dispY) > 0.05f || fabsf(dh) > 0.3f || g.speed > 0.4f;
     animating = moving;
@@ -628,7 +663,7 @@ void tick() {
   const float hr = dispHdg * (float)DEG_TO_RAD;
   const float cs = cosf(hr), sn = sinf(hr);
   rs.clip(MAP_X0, MAP_Y0, MAP_X1, MAP_Y1);
-  rs.fill(C_LAND);
+  drawLand(cs, sn);
   if (mapdata::hasMap()) {
     drawFeatures(cs, sn);
     drawRoute(cs, sn);

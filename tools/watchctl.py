@@ -16,7 +16,16 @@ import zlib
 
 import serial
 
-PORT = "COM5"
+def find_port():
+    """The watch's USB-JTAG port (Espressif VID 0x303A); its COM number changes between PCs/ports."""
+    from serial.tools import list_ports
+    for p in list_ports.comports():
+        if p.vid == 0x303A:
+            return p.device
+    return "COM5"
+
+
+PORT = find_port()
 
 
 def open_port(port=PORT, timeout=2):
@@ -46,13 +55,22 @@ class Watch:
                 return ln
         return None
 
+    def wait_json(self, prefix, timeout=10):
+        """Wait for a line like '[tx] 84 {...}' (what the watch sends to the phone) and parse its JSON."""
+        import json
+        end = time.time() + timeout
+        while time.time() < end:
+            ln = self.s.readline().decode(errors="replace").strip()
+            if ln.startswith(prefix):
+                return json.loads(ln[len(prefix):])
+        raise TimeoutError(f"no '{prefix}' within {timeout}s")
+
     def msg(self, mtype, payload: bytes, chunk=600):
         """Send a phone message in ACKed, checksummed chunks (the USB link drops bytes)."""
         parts = [payload[i:i + chunk] for i in range(0, len(payload), chunk)] or [b""]
         for seq, part in enumerate(parts):
             line = f"m {mtype:02x} {seq} {len(parts)} {zlib.adler32(part):08x} {base64.b64encode(part).decode()}"
             for _ in range(6):
-                self.s.reset_input_buffer()
                 r = self.cmd(line, expect=f"OK m {seq}", timeout=2)
                 if r and r.startswith("OK"):
                     break

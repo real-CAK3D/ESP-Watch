@@ -35,7 +35,11 @@ import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
+import android.speech.tts.TextToSpeech
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -85,6 +89,11 @@ class WatchService : LifecycleService(), BleLink.Listener, SensorEventListener {
     private var phoneBattery = -1
     private var phoneCharging = false
     private var ringtone: Ringtone? = null
+    private var terrainBlob: ByteArray? = null
+    private val otaStatus = Channel<JSONObject>(Channel.CONFLATED)
+    private var tts: TextToSpeech? = null
+    private var ttsReady = false
+    private var lastSpoken = ""
 
     override fun onCreate() {
         super.onCreate()
@@ -101,6 +110,8 @@ class WatchService : LifecycleService(), BleLink.Listener, SensorEventListener {
         registerReceiver(tzReceiver, IntentFilter(Intent.ACTION_TIMEZONE_CHANGED))
         Store.deviceAddress?.let { link.connect(it) }
         lifecycleScope.launch { periodic() }
+        tts = TextToSpeech(this) { st -> ttsReady = st == TextToSpeech.SUCCESS }
+        if (Store.settings.value.autoUpdateCheck) checkForUpdates(notify = true)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -121,14 +132,27 @@ class WatchService : LifecycleService(), BleLink.Listener, SensorEventListener {
         unregisterReceiver(batteryReceiver)
         unregisterReceiver(tzReceiver)
         stopRing()
+        tts?.shutdown()
         super.onDestroy()
     }
 
     // ------------------------------------------------------------------ foreground
+    /**
+     * Android 14+ refuses a *location* foreground service started while the app is in the background
+     * (e.g. when the system restarts this sticky service after killing the app). Fall back to a
+     * connected-device-only service instead of crashing; location is re-added once the app is opened.
+     */
     private fun goForeground() {
-        var types = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
-        if (hasLocation()) types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
-        ServiceCompat.startForeground(this, NOTIF_ID, buildNotification("Starting…"), types)
+        val base = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+        val withLocation = if (hasLocation()) base or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else base
+        for (types in listOf(withLocation, base).distinct()) {
+            try {
+                ServiceCompat.startForeground(this, NOTIF_ID, buildNotification("Starting…"), types)
+                return
+            } catch (e: Exception) {
+                Store.addLog("foreground start refused (${e.javaClass.simpleName}), retrying")
+            }
+        }
     }
 
     private fun buildNotification(text: String): Notification {
@@ -175,6 +199,7 @@ class WatchService : LifecycleService(), BleLink.Listener, SensorEventListener {
                     o.optString("fw"), o.optInt("bat", -1), o.optInt("mv"), o.optBoolean("chg"), o.optBoolean("usb"),
                     o.optInt("steps"), o.optLong("up"), o.optInt("heap"), o.optString("page"), o.optInt("mtu"),
                     System.currentTimeMillis())
+                recordBattery(o.optInt("bat", -1), o.optBoolean("chg"))
             } catch (_: Exception) {
             }
             Protocol.EVENT -> try {
@@ -182,6 +207,10 @@ class WatchService : LifecycleService(), BleLink.Listener, SensorEventListener {
             } catch (_: Exception) {
             }
             Protocol.LOG -> Store.addLog("watch: $text")
+            Protocol.OTA_STATUS -> try {
+                otaStatus.trySend(JSONObject(text))
+            } catch (_: Exception) {
+            }
         }
     }
 
@@ -195,6 +224,9 @@ class WatchService : LifecycleService(), BleLink.Listener, SensorEventListener {
             "save_parking" -> saveParking()
             "nav_stop" -> stopNav()
             "find_phone" -> ring()
+            "battery_low" -> if (Store.settings.value.lowBatteryAlerts) alert(13, "Watch battery low",
+                "Your GTA-Watch is at ${o.optInt("i", 0)}%. Power saver is on below 15%.")
+            "charged" -> if (Store.settings.value.chargeAlerts) alert(13, "Watch fully charged", "Your GTA-Watch is ready to go.")
         }
     }
 
@@ -206,6 +238,7 @@ class WatchService : LifecycleService(), BleLink.Listener, SensorEventListener {
         sendPhone()
         weatherJson?.let { link.send(Protocol.WEATHER, it.toString().toByteArray()) }
         map?.let { link.send(Protocol.MAP, it.blob) }
+        terrainBlob?.let { link.send(Protocol.TERRAIN, it) }
         lastLoc?.let { sendGps(it, force = true) }
         navigator?.let {
             link.send(Protocol.ROUTE, it.routePayload())
@@ -222,7 +255,9 @@ class WatchService : LifecycleService(), BleLink.Listener, SensorEventListener {
     fun sendSettings() {
         val s = Store.settings.value
         link.send(Protocol.SETTINGS, JSONObject().put("h24", s.h24).put("metric", s.metric)
-            .put("timeout", s.screenTimeout).put("bright", s.brightness).toString().toByteArray())
+            .put("timeout", s.screenTimeout).put("bright", s.brightness).put("zoom", s.radarZoom)
+            .put("terrain", s.watchTerrain).put("raise", s.raiseToWake).put("face", s.watchFace)
+            .put("keepOnNav", s.keepMapOn).toString().toByteArray())
     }
 
     fun sendPlaces() {
@@ -324,6 +359,14 @@ class WatchService : LifecycleService(), BleLink.Listener, SensorEventListener {
                 link.send(Protocol.MAP, r.blob)
                 Store.mapStatus.value = "Map: ${r.featureCount} roads & areas (${r.blob.size / 1024} KB)"
                 Store.addLog("map sent: ${r.blob.size} bytes")
+                try {
+                    val t = withContext(Dispatchers.IO) { Terrain.build(r.lat0, r.lon0, java.io.File(cacheDir, "dem")) }
+                    terrainBlob = t
+                    link.send(Protocol.TERRAIN, t)
+                    Store.mapStatus.value += " · terrain"
+                } catch (e: Exception) {
+                    Store.addLog("terrain failed: ${e.message}")
+                }
             } catch (e: Exception) {
                 Store.mapStatus.value = "Map download failed: ${e.message}"
                 Store.addLog("map failed: ${e.message}")
@@ -381,6 +424,7 @@ class WatchService : LifecycleService(), BleLink.Listener, SensorEventListener {
         val u = n.update(l.latitude, l.longitude, Store.settings.value)
         Store.nav.value = u.ui
         link.send(Protocol.NAV, u.json.toString().toByteArray())
+        speakGuidance(u.ui)
         if (System.currentTimeMillis() - lastNavNotif > 5000) {
             lastNavNotif = System.currentTimeMillis()
             updateNotification()
@@ -450,6 +494,102 @@ class WatchService : LifecycleService(), BleLink.Listener, SensorEventListener {
         getSystemService(NotificationManager::class.java).cancel(12)
     }
 
+    // ------------------------------------------------------------------ alerts, battery history, voice
+    private fun alert(id: Int, title: String, text: String) {
+        val n = NotificationCompat.Builder(this, GtaWatchApp.CH_ALERT)
+            .setSmallIcon(android.R.drawable.ic_lock_idle_charging).setContentTitle(title).setContentText(text)
+            .setPriority(NotificationCompat.PRIORITY_HIGH).setAutoCancel(true).build()
+        getSystemService(NotificationManager::class.java).notify(id, n)
+    }
+
+    private fun recordBattery(pct: Int, charging: Boolean) {
+        if (pct < 0) return
+        val now = System.currentTimeMillis()
+        val h = Store.batteryHistory.value
+        val last = h.lastOrNull()
+        if (last != null && last.second == pct && last.third == charging && now - last.first < 10 * 60_000) return
+        Store.batteryHistory.value = (h + Triple(now, pct, charging)).filter { now - it.first < 24 * 3600_000L }
+    }
+
+    private fun speakGuidance(n: NavUi) {
+        if (!Store.settings.value.voice || !ttsReady) return
+        // GTA-style short callouts at two distances before each turn, then on arrival
+        val far = if (n.walking) 60.0 else 400.0
+        val near = if (n.walking) 15.0 else 80.0
+        val key = when {
+            n.maneuver == 8 && n.distNext < near -> "arrive"
+            n.distNext < near -> "near:${n.instruction}"
+            n.distNext < far -> "far:${n.instruction}"
+            else -> return
+        }
+        if (key == lastSpoken) return
+        lastSpoken = key
+        val text = when {
+            key == "arrive" -> "You have arrived."
+            key.startsWith("near") -> n.instruction
+            else -> "In ${fmtDist(n.distNext)}, ${n.instruction}"
+        }
+        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "nav")
+    }
+
+    // ------------------------------------------------------------------ updates (GitHub Releases)
+    fun checkForUpdates(notify: Boolean) {
+        lifecycleScope.launch {
+            try {
+                val r = withContext(Dispatchers.IO) { Updater.latest() }
+                val appNew = Updater.newer(r.version, Updater.appVersion(this@WatchService))
+                val fw = Store.telemetry.value.fw
+                val watchNew = fw.isNotEmpty() && Updater.newer(r.version, fw)
+                Store.update.value = r
+                Store.updateStatus.value = when {
+                    appNew || watchNew -> "Version ${r.version} is available"
+                    else -> "Up to date (${r.version})"
+                }
+                if (notify && (appNew || watchNew)) alert(14, "GTA-Watch ${r.version} is available", "Open the app's Settings to update.")
+            } catch (e: Exception) {
+                Store.updateStatus.value = "Update check failed: ${e.message}"
+            }
+        }
+    }
+
+    /** Firmware update over BLE: 8 KB blocks, each ACKed by the watch with its write offset. */
+    fun updateWatch(image: ByteArray, version: String) {
+        if (Store.otaProgress.value >= 0) return
+        lifecycleScope.launch {
+            Store.otaProgress.value = 0
+            try {
+                while (otaStatus.tryReceive().isSuccess) Unit
+                link.send(Protocol.OTA_BEGIN, JSONObject().put("size", image.size).put("ver", version).toString().toByteArray())
+                var st = withTimeout(90_000) { otaStatus.receive() }
+                if (st.optString("st") != "ready") throw RuntimeException(st.optString("err", "watch refused"))
+                var off = 0
+                var retries = 0
+                while (off < image.size) {
+                    val n = minOf(8192, image.size - off)
+                    val pkt = java.nio.ByteBuffer.allocate(4 + n).order(java.nio.ByteOrder.LITTLE_ENDIAN).putInt(off).put(image, off, n).array()
+                    link.send(Protocol.OTA_DATA, pkt)
+                    st = try {
+                        withTimeout(20_000) { otaStatus.receive() }
+                    } catch (e: Exception) {
+                        if (++retries > 5) throw RuntimeException("watch stopped answering")
+                        continue
+                    }
+                    if (st.optString("st") == "error") throw RuntimeException(st.optString("err"))
+                    off = st.optInt("off", off)
+                    Store.otaProgress.value = off * 100 / image.size
+                }
+                link.send(Protocol.OTA_END, ByteArray(0))
+                st = withTimeout(60_000) { otaStatus.receive() }
+                if (st.optString("st") != "done") throw RuntimeException(st.optString("err", "verify failed"))
+                Store.updateStatus.value = "Watch updated to $version — restarting"
+            } catch (e: Exception) {
+                Store.updateStatus.value = "Watch update failed: ${e.message}"
+            } finally {
+                Store.otaProgress.value = -1
+            }
+        }
+    }
+
     // ------------------------------------------------------------------ periodic + receivers
     private suspend fun periodic() {
         var tick = 0
@@ -458,6 +598,7 @@ class WatchService : LifecycleService(), BleLink.Listener, SensorEventListener {
             tick++
             if (System.currentTimeMillis() - weatherAt > 30 * 60_000) refreshWeather()
             if (tick % 360 == 0) sendTime()
+            if (tick % 1440 == 0 && Store.settings.value.autoUpdateCheck) checkForUpdates(notify = true)
         }
     }
 

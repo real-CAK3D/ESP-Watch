@@ -25,11 +25,16 @@ object Protocol {
     const val PHONE = 0x0A
     const val PING = 0x0B
     const val NOTIFY_CLEAR = 0x0C
+    const val TERRAIN = 0x0D
+    const val OTA_BEGIN = 0x10
+    const val OTA_DATA = 0x11
+    const val OTA_END = 0x12
 
     // watch -> phone
     const val TELEMETRY = 0x81
     const val EVENT = 0x82
     const val LOG = 0x83
+    const val OTA_STATUS = 0x84
 
     /** Splits a message into BLE packets of at most [mtu]-3 bytes: [type][flags][payload...]. */
     fun packetize(type: Int, payload: ByteArray, mtu: Int): List<ByteArray> {

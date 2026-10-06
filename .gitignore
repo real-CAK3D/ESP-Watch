@@ -14,3 +14,7 @@ tools/osm_cache/
 release/
 backups/codex-gta-nav-build/
 *.apk
+build-tmp/
+release/
+backups/codex-gta-nav-build/
+tools/shots/

@@ -5,6 +5,8 @@
 
 #include "hal.h"
 #include "mapdata.h"
+#include "ota.h"
+#include "terrain.h"
 #include "proto.h"
 #include "ui.h"
 
@@ -43,7 +45,7 @@ static void loadPlaces(JsonArrayConst arr) {
   app.placesSeq++;
 }
 
-static void saveSettings() {
+void state::saveSettings() {
   File f = LittleFS.open("/settings.json", "w");
   if (!f) return;
   JsonDocument doc;
@@ -51,6 +53,10 @@ static void saveSettings() {
   doc["metric"] = app.settings.metric;
   doc["timeout"] = app.settings.timeoutSec;
   doc["keepOnNav"] = app.settings.keepOnNav;
+  doc["zoom"] = app.settings.radarZoom;
+  doc["terrain"] = app.settings.terrain;
+  doc["raise"] = app.settings.raiseToWake;
+  doc["face"] = app.settings.face;
   serializeJson(doc, f);
   f.close();
 }
@@ -61,6 +67,12 @@ static void applySettings(JsonObjectConst o) {
   if (o["timeout"].is<int>()) app.settings.timeoutSec = constrain((int)o["timeout"], 5, 600);
   if (o["keepOnNav"].is<bool>()) app.settings.keepOnNav = o["keepOnNav"];
   if (o["bright"].is<int>()) hal::setBrightness(constrain((int)o["bright"], 10, 255));
+  if (o["zoom"].is<int>()) app.settings.radarZoom = constrain((int)o["zoom"], 0, 2);
+  if (o["terrain"].is<bool>()) app.settings.terrain = o["terrain"];
+  if (o["raise"].is<bool>()) app.settings.raiseToWake = o["raise"];
+  if (o["face"].is<int>()) app.settings.face = constrain((int)o["face"], 0, 1);
+  hal::setRaiseToWake(app.settings.raiseToWake);
+  app.settingsSeq++;
 }
 
 namespace state {
@@ -87,6 +99,14 @@ void handleMessage(uint8_t type, const uint8_t *data, size_t len) {
   }
   if (type == MSG_ROUTE) {
     mapdata::loadRoute(data, len);
+    return;
+  }
+  if (type == MSG_TERRAIN) {
+    terrain::load(data, len, true);
+    return;
+  }
+  if (type == MSG_OTA_BEGIN || type == MSG_OTA_DATA || type == MSG_OTA_END) {
+    ota::handle(type, data, len);
     return;
   }
   if (type == MSG_PING || type == MSG_NOTIFY_CLEAR) {
@@ -190,7 +210,7 @@ void handleMessage(uint8_t type, const uint8_t *data, size_t len) {
       break;
     case MSG_SETTINGS:
       applySettings(doc.as<JsonObjectConst>());
-      saveSettings();
+      state::saveSettings();
       break;
     case MSG_PHONE:
       app.phoneBattery = doc["bat"] | -1;

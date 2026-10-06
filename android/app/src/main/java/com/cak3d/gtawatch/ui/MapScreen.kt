@@ -26,6 +26,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.MyLocation
@@ -93,6 +94,38 @@ import org.maplibre.geojson.FeatureCollection
 import org.maplibre.geojson.LineString
 import org.maplibre.geojson.Point
 
+/** Loads a GTA style (0 = road / dark pause map, 1 = atlas) and adds our overlay sources + layers. */
+private fun loadStyle(m: MapLibreMap, ctx: android.content.Context, styleIdx: Int, onLoaded: (Style) -> Unit) {
+    val file = if (styleIdx == 1) "gta_atlas.json" else "gta_style.json"
+    m.setStyle(Style.Builder().fromJson(ctx.assets.open(file).bufferedReader().readText())) { st ->
+        st.addImage("blip", blipBitmap())
+        st.addSource(GeoJsonSource("route"))
+        st.addSource(GeoJsonSource("places"))
+        st.addSource(GeoJsonSource("player"))
+        st.addLayer(LineLayer("route-casing", "route").withProperties(
+            PropertyFactory.lineColor("#4a1a7a"), PropertyFactory.lineWidth(11f),
+            PropertyFactory.lineCap(Property.LINE_CAP_ROUND), PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND)))
+        st.addLayer(LineLayer("route-line", "route").withProperties(
+            PropertyFactory.lineColor("#a64cf2"), PropertyFactory.lineWidth(7f),
+            PropertyFactory.lineCap(Property.LINE_CAP_ROUND), PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND)))
+        st.addLayer(CircleLayer("places-dot", "places").withProperties(
+            PropertyFactory.circleRadius(11f), PropertyFactory.circleColor("#000000"),
+            PropertyFactory.circleStrokeWidth(3f), PropertyFactory.circleStrokeColor(Expression.get("color"))))
+        st.addLayer(SymbolLayer("places-label", "places").withProperties(
+            PropertyFactory.textField(Expression.get("name")), PropertyFactory.textFont(arrayOf("Noto Sans Bold")),
+            PropertyFactory.textSize(12f), PropertyFactory.textColor(if (styleIdx == 1) "#2b2418" else "#ffffff"),
+            PropertyFactory.textHaloColor(if (styleIdx == 1) "#f4ecd2" else "#000000"),
+            PropertyFactory.textHaloWidth(1.5f), PropertyFactory.textOffset(arrayOf(0f, 1.6f)),
+            PropertyFactory.textAnchor(Property.TEXT_ANCHOR_TOP)))
+        st.addLayer(SymbolLayer("player-blip", "player").withProperties(
+            PropertyFactory.iconImage("blip"), PropertyFactory.iconSize(0.55f),
+            PropertyFactory.iconRotate(Expression.get("hdg")),
+            PropertyFactory.iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP),
+            PropertyFactory.iconAllowOverlap(true), PropertyFactory.iconIgnorePlacement(true)))
+        onLoaded(st)
+    }
+}
+
 private data class Target(val name: String, val address: String, val lat: Double, val lon: Double)
 
 private fun blipBitmap(): Bitmap {
@@ -121,6 +154,8 @@ fun MapScreen(radarRequest: Long) {
     val nav by Store.nav.collectAsState()
     val places by Store.places.collectAsState()
     val telemetry by Store.telemetry.collectAsState()
+    val settings by Store.settings.collectAsState()
+    var showLegend by remember { mutableStateOf(false) }
 
     var radar by remember { mutableStateOf(true) }  // GTA expanded radar vs. pause map
     var map by remember { mutableStateOf<MapLibreMap?>(null) }
@@ -131,6 +166,15 @@ fun MapScreen(radarRequest: Long) {
     var busy by remember { mutableStateOf("") }
 
     LaunchedEffect(radarRequest) { if (radarRequest > 0) radar = true }
+    LaunchedEffect(map, settings.mapStyle) {
+        val m = map ?: return@LaunchedEffect
+        style = null
+        loadStyle(m, ctx, settings.mapStyle) { style = it }
+    }
+    LaunchedEffect(style, settings.phoneTerrain) {
+        style?.getLayer("hillshade")?.setProperties(
+            PropertyFactory.visibility(if (settings.phoneTerrain) Property.VISIBLE else Property.NONE))
+    }
 
     val mapView = remember {
         MapView(ctx).apply {
@@ -140,32 +184,6 @@ fun MapScreen(radarRequest: Long) {
                 m.uiSettings.isCompassEnabled = false
                 m.uiSettings.isAttributionEnabled = true
                 m.uiSettings.isLogoEnabled = false
-                m.setStyle(Style.Builder().fromJson(ctx.assets.open("gta_style.json").bufferedReader().readText())) { st ->
-                    st.addImage("blip", blipBitmap())
-                    st.addSource(GeoJsonSource("route"))
-                    st.addSource(GeoJsonSource("places"))
-                    st.addSource(GeoJsonSource("player"))
-                    st.addLayer(LineLayer("route-casing", "route").withProperties(
-                        PropertyFactory.lineColor("#4a1a7a"), PropertyFactory.lineWidth(11f),
-                        PropertyFactory.lineCap(Property.LINE_CAP_ROUND), PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND)))
-                    st.addLayer(LineLayer("route-line", "route").withProperties(
-                        PropertyFactory.lineColor("#a64cf2"), PropertyFactory.lineWidth(7f),
-                        PropertyFactory.lineCap(Property.LINE_CAP_ROUND), PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND)))
-                    st.addLayer(CircleLayer("places-dot", "places").withProperties(
-                        PropertyFactory.circleRadius(11f), PropertyFactory.circleColor("#000000"),
-                        PropertyFactory.circleStrokeWidth(3f), PropertyFactory.circleStrokeColor(Expression.get("color"))))
-                    st.addLayer(SymbolLayer("places-label", "places").withProperties(
-                        PropertyFactory.textField(Expression.get("name")), PropertyFactory.textFont(arrayOf("Noto Sans Bold")),
-                        PropertyFactory.textSize(12f), PropertyFactory.textColor("#ffffff"), PropertyFactory.textHaloColor("#000000"),
-                        PropertyFactory.textHaloWidth(1.5f), PropertyFactory.textOffset(arrayOf(0f, 1.6f)),
-                        PropertyFactory.textAnchor(Property.TEXT_ANCHOR_TOP)))
-                    st.addLayer(SymbolLayer("player-blip", "player").withProperties(
-                        PropertyFactory.iconImage("blip"), PropertyFactory.iconSize(0.55f),
-                        PropertyFactory.iconRotate(Expression.get("hdg")),
-                        PropertyFactory.iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP),
-                        PropertyFactory.iconAllowOverlap(true), PropertyFactory.iconIgnorePlacement(true)))
-                    style = st
-                }
                 m.addOnMapLongClickListener { p ->
                     // GTA: set a waypoint anywhere on the map
                     target = Target("Waypoint", "%.5f, %.5f".format(p.latitude, p.longitude), p.latitude, p.longitude)
@@ -298,14 +316,17 @@ fun MapScreen(radarRequest: Long) {
             }
         }
 
-        // map mode + recenter
+        // map mode + recenter + legend
         Column(Modifier.align(Alignment.CenterEnd).padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            RoundButton(Icons.AutoMirrored.Filled.List, if (showLegend) Gta.green else Gta.text) { showLegend = !showLegend }
             RoundButton(if (radar) Icons.Filled.Navigation else Icons.Filled.MyLocation, if (radar) Gta.green else Gta.text) {
                 radar = !radar
                 if (!radar) map?.animateCamera(CameraUpdateFactory.newCameraPosition(
                     CameraPosition.Builder().zoom(14.0).bearing(0.0).also { b -> fix?.let { b.target(LatLng(it.lat, it.lon)) } }.build()))
             }
         }
+
+        if (showLegend) Legend(places.map { it.kind }.distinct(), nav.active, Modifier.align(Alignment.CenterStart).padding(14.dp))
 
         // bottom: active route or chosen destination
         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(12.dp)) {
@@ -349,6 +370,26 @@ fun MapScreen(radarRequest: Long) {
                     modifier = Modifier.align(Alignment.CenterHorizontally).background(Color(0xCC000000), RoundedCornerShape(12.dp)).padding(10.dp))
             }
         }
+    }
+}
+
+/** GTA pause-map style legend of the blips currently on the map. */
+@Composable
+private fun Legend(kinds: List<String>, route: Boolean, modifier: Modifier) {
+    Column(modifier.background(Color(0xE6000000), RoundedCornerShape(16.dp)).padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("LEGEND", color = Gta.dim, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+        LegendRow({ Icon(Icons.Filled.Navigation, null, tint = Color.White, modifier = Modifier.size(20.dp)) }, "You")
+        if (route) LegendRow({ Box(Modifier.size(20.dp, 6.dp).background(Gta.purple, RoundedCornerShape(3.dp))) }, "GPS route")
+        kinds.forEach { k -> LegendRow({ Blip(k, 24.dp) }, kindOf(k).label) }
+    }
+}
+
+@Composable
+private fun LegendRow(icon: @Composable () -> Unit, label: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(26.dp), contentAlignment = Alignment.Center) { icon() }
+        Spacer(Modifier.width(10.dp))
+        Text(label, fontSize = 14.sp)
     }
 }
 

@@ -1,6 +1,6 @@
 {
  "version": 8,
- "name": "GTA V Pause Map",
+ "name": "GTA V Atlas",
  "sources": {
   "omt": {
    "type": "vector",
@@ -23,7 +23,7 @@
    "id": "background",
    "type": "background",
    "paint": {
-    "background-color": "#000000"
+    "background-color": "#e4d9b4"
    }
   },
   {
@@ -56,7 +56,7 @@
     ]
    ],
    "paint": {
-    "fill-color": "#1d1d1d"
+    "fill-color": "#ebe2c2"
    }
   },
   {
@@ -81,8 +81,7 @@
     ]
    ],
    "paint": {
-    "fill-color": "#788c40",
-    "fill-opacity": 0.55
+    "fill-color": "#9cbf7a"
    }
   },
   {
@@ -91,8 +90,7 @@
    "source": "omt",
    "source-layer": "park",
    "paint": {
-    "fill-color": "#788c40",
-    "fill-opacity": 0.85
+    "fill-color": "#8fb56c"
    }
   },
   {
@@ -118,8 +116,7 @@
     ]
    ],
    "paint": {
-    "fill-color": "#788c40",
-    "fill-opacity": 0.8
+    "fill-color": "#8fb56c"
    }
   },
   {
@@ -136,7 +133,7 @@
     "sand"
    ],
    "paint": {
-    "fill-color": "#8a8160"
+    "fill-color": "#efdca0"
    }
   },
   {
@@ -144,10 +141,10 @@
    "type": "hillshade",
    "source": "dem",
    "paint": {
-    "hillshade-exaggeration": 0.45,
-    "hillshade-shadow-color": "#000000",
-    "hillshade-highlight-color": "#4a5a4a",
-    "hillshade-accent-color": "#101010",
+    "hillshade-exaggeration": 0.7,
+    "hillshade-shadow-color": "#5c4a2a",
+    "hillshade-highlight-color": "#fff6dc",
+    "hillshade-accent-color": "#6e5a36",
     "hillshade-illumination-direction": 315
    }
   },
@@ -157,7 +154,7 @@
    "source": "omt",
    "source-layer": "water",
    "paint": {
-    "fill-color": "#7088b0"
+    "fill-color": "#7fb6d3"
    }
   },
   {
@@ -166,7 +163,7 @@
    "source": "omt",
    "source-layer": "waterway",
    "paint": {
-    "line-color": "#7088b0",
+    "line-color": "#7fb6d3",
     "line-width": [
      "interpolate",
      [
@@ -195,7 +192,7 @@
     "Polygon"
    ],
    "paint": {
-    "fill-color": "#2a2a2a"
+    "fill-color": "#d8ccaa"
    }
   },
   {
@@ -205,8 +202,8 @@
    "source-layer": "building",
    "minzoom": 14,
    "paint": {
-    "fill-color": "#262626",
-    "fill-outline-color": "#111111"
+    "fill-color": "#d6cba6",
+    "fill-outline-color": "#c2b48c"
    }
   },
   {
@@ -230,7 +227,7 @@
    ],
    "minzoom": 14,
    "paint": {
-    "line-color": "#4a4a4a",
+    "line-color": "#c9b98c",
     "line-width": 1.2,
     "line-dasharray": [
      2,
@@ -257,7 +254,7 @@
     "line-join": "round"
    },
    "paint": {
-    "line-color": "#5a5a5a",
+    "line-color": "#fbf6e6",
     "line-width": [
      "interpolate",
      [
@@ -298,7 +295,7 @@
     "line-join": "round"
    },
    "paint": {
-    "line-color": "#777777",
+    "line-color": "#ffffff",
     "line-width": [
      "interpolate",
      [
@@ -341,7 +338,7 @@
     "line-join": "round"
    },
    "paint": {
-    "line-color": "#aeaeae",
+    "line-color": "#f4c95a",
     "line-width": [
      "interpolate",
      [
@@ -384,7 +381,7 @@
     "line-join": "round"
    },
    "paint": {
-    "line-color": "#bebebe",
+    "line-color": "#ea9a2d",
     "line-width": [
      "interpolate",
      [
@@ -418,7 +415,7 @@
    ],
    "minzoom": 12,
    "paint": {
-    "line-color": "#3a3a3a",
+    "line-color": "#9a8c70",
     "line-width": 1.5
    }
   },
@@ -459,8 +456,8 @@
     "text-max-width": 8
    },
    "paint": {
-    "text-color": "#d8d8d8",
-    "text-halo-color": "#000000",
+    "text-color": "#3b3020",
+    "text-halo-color": "#f4ecd2",
     "text-halo-width": 1.5,
     "text-opacity": 0.8
    }
@@ -512,8 +509,8 @@
     "text-letter-spacing": 0.2
    },
    "paint": {
-    "text-color": "#ffffff",
-    "text-halo-color": "#000000",
+    "text-color": "#3b3020",
+    "text-halo-color": "#f4ecd2",
     "text-halo-width": 2
    }
   }

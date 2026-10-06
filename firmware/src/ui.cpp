@@ -4,6 +4,7 @@
 
 #include "hal.h"
 #include "mapdata.h"
+#include "ota.h"
 #include "phone.h"
 #include "state.h"
 #include "ui_common.h"
@@ -94,8 +95,8 @@ const char *batteryIcon(int pct) {
 }
 
 // ======================= FACE =======================
-void toggleFace(lv_event_t *) {
-  analogFace = !analogFace;
+void applyFace(bool analog) {
+  analogFace = analog;
   if (analogFace) {
     lv_obj_add_flag(faceDigital, LV_OBJ_FLAG_HIDDEN);
     lv_obj_remove_flag(faceAnalog, LV_OBJ_FLAG_HIDDEN);
@@ -103,6 +104,12 @@ void toggleFace(lv_event_t *) {
     lv_obj_remove_flag(faceDigital, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(faceAnalog, LV_OBJ_FLAG_HIDDEN);
   }
+}
+
+void toggleFace(lv_event_t *) {
+  applyFace(!analogFace);
+  app.settings.face = analogFace ? 1 : 0;
+  state::saveSettings();
 }
 
 void createFace(lv_obj_t *t) {
@@ -578,14 +585,27 @@ void createQuick(lv_obj_t *t) {
   lv_obj_set_style_bg_color(qBright, lv_color_white(), LV_PART_KNOB);
   lv_obj_add_event_cb(qBright, onBright, LV_EVENT_VALUE_CHANGED, nullptr);
 
+  toggleRow(col, "Raise to wake", app.settings.raiseToWake, [](lv_event_t *e) {
+    app.settings.raiseToWake = lv_obj_has_state((lv_obj_t *)lv_event_get_target(e), LV_STATE_CHECKED);
+    hal::setRaiseToWake(app.settings.raiseToWake);
+    state::saveSettings();
+  });
   toggleRow(col, "Map stays on", app.settings.keepOnNav, [](lv_event_t *e) {
     app.settings.keepOnNav = lv_obj_has_state((lv_obj_t *)lv_event_get_target(e), LV_STATE_CHECKED);
+    state::saveSettings();
+  });
+  toggleRow(col, "Terrain shading", app.settings.terrain, [](lv_event_t *e) {
+    app.settings.terrain = lv_obj_has_state((lv_obj_t *)lv_event_get_target(e), LV_STATE_CHECKED);
+    app.mapSeq++;
+    state::saveSettings();
   });
   toggleRow(col, "24-hour clock", app.settings.h24, [](lv_event_t *e) {
     app.settings.h24 = lv_obj_has_state((lv_obj_t *)lv_event_get_target(e), LV_STATE_CHECKED);
+    state::saveSettings();
   });
   toggleRow(col, "Metric units", app.settings.metric, [](lv_event_t *e) {
     app.settings.metric = lv_obj_has_state((lv_obj_t *)lv_event_get_target(e), LV_STATE_CHECKED);
+    state::saveSettings();
   });
 
   qInfo = uiLabel(col, &font_sm, DIM, "");
@@ -600,8 +620,10 @@ void updateQuick() {
   lv_label_set_text(qConn, app.connected ? ICON_BT " Connected" : ICON_BT " Offline");
   lv_obj_set_style_text_color(qConn, lv_color_hex(app.connected ? BLUE : 0x666666), 0);
   int wb = hal::batteryPercent();
-  snprintf(b, sizeof(b), "%s %d%%", hal::charging() ? ICON_CHARGE : batteryIcon(wb), max(wb, 0));
+  snprintf(b, sizeof(b), "%s%s %d%%", hal::powerSaverOn() ? "Saver  " : "", hal::charging() ? ICON_CHARGE : batteryIcon(wb),
+           max(wb, 0));
   lv_label_set_text(qBattery, b);
+  lv_obj_set_style_text_color(qBattery, lv_color_hex(hal::powerSaverOn() ? YELLOW : GREEN), 0);
   uint32_t up = millis() / 1000;
   snprintf(b, sizeof(b), "GTA-Watch %s  \xE2\x80\xA2  up %luh %02lum\n%d mV  \xE2\x80\xA2  map %s", FW_VERSION,
            (unsigned long)(up / 3600), (unsigned long)(up / 60 % 60), hal::batteryMillivolts(),
@@ -704,6 +726,141 @@ void createOverlays() {
   lv_timer_pause(popupTimer);
 }
 
+// ======================= CHARGING / UPDATE / SPLASH =======================
+lv_obj_t *chgScreen, *chgArc, *chgPct, *chgState, *chgEta;
+uint32_t chgShownAt = 0;
+
+lv_obj_t *fullscreenLayer() {
+  lv_obj_t *o = uiBox(lv_layer_top());
+  lv_obj_set_size(o, W, H);
+  lv_obj_set_style_bg_color(o, lv_color_black(), 0);
+  lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
+  lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+  return o;
+}
+
+void createCharging() {
+  chgScreen = fullscreenLayer();
+  lv_obj_add_flag(chgScreen, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(chgScreen, [](lv_event_t *) { lv_obj_add_flag(chgScreen, LV_OBJ_FLAG_HIDDEN); }, LV_EVENT_CLICKED, nullptr);
+  chgArc = arcRing(chgScreen, 300, 22, GREEN);
+  lv_obj_align(chgArc, LV_ALIGN_CENTER, 0, -30);
+  lv_obj_t *bolt = uiLabel(chgArc, &font_lg, GREEN, ICON_CHARGE);
+  lv_obj_align(bolt, LV_ALIGN_CENTER, 0, -62);
+  chgPct = uiLabel(chgArc, &font_clock_sm, TEXT, "--");
+  lv_obj_align(chgPct, LV_ALIGN_CENTER, 0, 10);
+  chgState = uiLabel(chgScreen, &font_lg, TEXT, "Charging");
+  lv_obj_align(chgState, LV_ALIGN_BOTTOM_MID, 0, -78);
+  chgEta = uiLabel(chgScreen, &font_md, DIM, "");
+  lv_obj_align(chgEta, LV_ALIGN_BOTTOM_MID, 0, -44);
+}
+
+void updateCharging() {
+  if (lv_obj_has_flag(chgScreen, LV_OBJ_FLAG_HIDDEN)) return;
+  if (millis() - chgShownAt > 6000 || !hal::usbPowered()) {
+    lv_obj_add_flag(chgScreen, LV_OBJ_FLAG_HIDDEN);
+    return;
+  }
+  static uint32_t last = 0;
+  if (millis() - last < 200) return;
+  last = millis();
+  int pct = max(0, hal::batteryPercent());
+  char b[48];
+  snprintf(b, sizeof(b), "%d%%", pct);
+  lv_label_set_text(chgPct, b);
+  // the ring "breathes" while charging, like Wear OS / watchOS
+  float pulse = 0.5f + 0.5f * sinf(millis() / 300.0f);
+  lv_arc_set_value(chgArc, pct);
+  lv_obj_set_style_arc_opa(chgArc, hal::chargeComplete() ? LV_OPA_COVER : (lv_opa_t)(150 + 105 * pulse), LV_PART_INDICATOR);
+  lv_label_set_text(chgState, hal::chargeComplete() ? "Fully charged" : "Charging");
+  int eta = hal::chargeEtaMinutes();
+  if (hal::chargeComplete()) b[0] = 0;
+  else if (eta < 0) strcpy(b, "Estimating time to full");
+  else if (eta < 60) snprintf(b, sizeof(b), "Full in %d min", eta);
+  else snprintf(b, sizeof(b), "Full in %dh %02dm", eta / 60, eta % 60);
+  lv_label_set_text(chgEta, b);
+}
+
+void showCharging() {
+  chgShownAt = millis();
+  lv_obj_remove_flag(chgScreen, LV_OBJ_FLAG_HIDDEN);
+  hal::screenOn(true);
+  hal::noteActivity();
+  updateCharging();
+}
+
+lv_obj_t *otaScreen, *otaArc, *otaPct, *otaTitle, *otaSub;
+
+void createOta() {
+  otaScreen = fullscreenLayer();
+  otaTitle = uiLabel(otaScreen, &font_lg, TEXT, "Updating watch");
+  lv_obj_align(otaTitle, LV_ALIGN_TOP_MID, 0, 60);
+  otaArc = arcRing(otaScreen, 250, 18, BLUE);
+  lv_obj_align(otaArc, LV_ALIGN_CENTER, 0, 10);
+  otaPct = uiLabel(otaArc, &font_xl, TEXT, "0%");
+  lv_obj_center(otaPct);
+  otaSub = uiLabel(otaScreen, &font_md, DIM, "Keep the phone nearby");
+  lv_obj_align(otaSub, LV_ALIGN_BOTTOM_MID, 0, -50);
+}
+
+void createSplash() {
+  // GTA-style loading screen while everything else starts up
+  lv_obj_t *sp = fullscreenLayer();
+  lv_obj_remove_flag(sp, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_t *top = uiLabel(sp, &font_md, TEXT, "GRAND THEFT AUTO");
+  lv_obj_set_style_text_letter_space(top, 4, 0);
+  lv_obj_align(top, LV_ALIGN_CENTER, 0, -70);
+  lv_obj_t *big = uiLabel(sp, &font_xl, TEXT, "W A T C H");
+  lv_obj_align(big, LV_ALIGN_CENTER, 0, -14);
+  lv_obj_t *ver = uiLabel(sp, &font_sm, GREEN, "v" FW_VERSION);
+  lv_obj_align(ver, LV_ALIGN_CENTER, 0, 34);
+  lv_obj_t *spin = lv_spinner_create(sp);
+  lv_obj_set_size(spin, 34, 34);
+  lv_obj_align(spin, LV_ALIGN_BOTTOM_RIGHT, -40, -40);
+  lv_obj_set_style_arc_width(spin, 4, LV_PART_MAIN);
+  lv_obj_set_style_arc_width(spin, 4, LV_PART_INDICATOR);
+  lv_obj_set_style_arc_color(spin, lv_color_white(), LV_PART_INDICATOR);
+  lv_obj_set_style_arc_opa(spin, LV_OPA_20, LV_PART_MAIN);
+  lv_obj_t *tip = uiLabel(sp, &font_sm, DIM, "Tip: tap the minimap to open the\nbig map on your phone.");
+  lv_obj_set_style_text_align(tip, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_align(tip, LV_ALIGN_BOTTOM_MID, 0, -100);
+  lv_obj_fade_out(sp, 400, 1600);
+  lv_obj_delete_delayed(sp, 2100);
+}
+
+// low battery alerts + power saver, charge-complete notice
+void batteryLogic() {
+  if (hal::takeUsbPlugged()) showCharging();
+  if (hal::takeChargeFull()) {
+    phone::sendEvent("charged");
+    if (hal::screenIsOn()) ui::toast("Fully charged", ICON_CHARGE);
+  }
+  static uint32_t last = 0;
+  if (millis() - last < 5000) return;
+  last = millis();
+  int pct = hal::batteryPercent();
+  bool onUsb = hal::usbPowered();
+  hal::setPowerSaver(!onUsb && pct >= 0 && pct <= 15);
+  static int warnedAt = 101;
+  if (onUsb || pct < 0) {
+    warnedAt = 101;
+    return;
+  }
+  for (int level : {20, 10, 5}) {
+    if (pct <= level && warnedAt > level) {
+      warnedAt = level;
+      phone::sendEvent("battery_low", pct);
+      Notification n = {};
+      strlcpy(n.app, "Battery", sizeof(n.app));
+      snprintf(n.title, sizeof(n.title), "%d%% battery left", pct);
+      strlcpy(n.body, level <= 15 ? "Power saver is on: dimmer screen, shorter timeout. Charge soon." : "Charge your watch soon.",
+              sizeof(n.body));
+      ui::onNotification(n);
+      break;
+    }
+  }
+}
+
 void onTileChanged(lv_event_t *) {
   lv_obj_t *act = lv_tileview_get_tile_active(tv);
   for (int i = 0; i < 7; i++)
@@ -730,7 +887,11 @@ void screenPowerLogic() {
   }
 
   bool keepOn = app.settings.keepOnNav && app.nav.active && current == ui::PAGE_MAP;
-  if (hal::screenIsOn() && !keepOn && hal::idleMs() > app.settings.timeoutSec * 1000UL) {
+  uint32_t timeout = app.settings.timeoutSec * 1000UL;
+  if (hal::powerSaverOn()) timeout = min<uint32_t>(timeout, 8000);
+  if (ota::active()) keepOn = true;
+  if (!lv_obj_has_flag(chgScreen, LV_OBJ_FLAG_HIDDEN)) keepOn = true;
+  if (hal::screenIsOn() && !keepOn && hal::idleMs() > timeout) {
     hal::screenOn(false);
     screenOffAtMs = millis();
   }
@@ -794,8 +955,34 @@ void begin() {
   createNotif(tiles[PAGE_NOTIF]);
   rebuildNotif();
   createOverlays();
+  createCharging();
+  createOta();
+  applyFace(app.settings.face == 1);
+  createSplash();
 
   goPage(PAGE_FACE, false);
+}
+
+void otaProgress(int pct, const char *text) {
+  if (pct < 0) {
+    lv_label_set_text(otaTitle, "Update failed");
+    lv_label_set_text(otaSub, text ? text : "");
+    lv_obj_fade_out(otaScreen, 300, 4000);
+    return;
+  }
+  lv_obj_remove_flag(otaScreen, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_style_opa(otaScreen, LV_OPA_COVER, 0);
+  lv_label_set_text(otaTitle, "Updating watch");
+  if (text && text[0]) {
+    char b[48];
+    if (pct == 0) snprintf(b, sizeof(b), "Installing v%s", text);
+    else strlcpy(b, text, sizeof(b));
+    lv_label_set_text(otaSub, b);
+  }
+  lv_arc_set_value(otaArc, pct);
+  char p[8];
+  snprintf(p, sizeof(p), "%d%%", pct);
+  lv_label_set_text(otaPct, p);
 }
 
 void goPage(Page p, bool animate) {
@@ -807,8 +994,15 @@ void goPage(Page p, bool animate) {
 }
 
 void loop() {
+  batteryLogic();
   screenPowerLogic();
   if (!hal::screenIsOn()) return;
+  static uint32_t settingsShown = 0;
+  if (settingsShown != app.settingsSeq) {
+    settingsShown = app.settingsSeq;
+    applyFace(app.settings.face == 1);
+  }
+  updateCharging();
   updateFace();
   switch (current) {
     case PAGE_MAP: ui_map::tick(); break;

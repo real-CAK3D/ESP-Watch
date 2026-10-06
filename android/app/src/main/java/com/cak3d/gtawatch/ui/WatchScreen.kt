@@ -1,8 +1,12 @@
 package com.cak3d.gtawatch.ui
 
-import android.content.Intent
-import android.net.Uri
-import android.provider.Settings as AndroidSettings
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -21,12 +25,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -34,23 +36,40 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.cak3d.gtawatch.BleLink
+import com.cak3d.gtawatch.Companion
+import com.cak3d.gtawatch.CrashLog
 import com.cak3d.gtawatch.FoundWatch
 import com.cak3d.gtawatch.LinkState
 import com.cak3d.gtawatch.Protocol
-import com.cak3d.gtawatch.Settings
 import com.cak3d.gtawatch.Store
+import com.cak3d.gtawatch.Updater
 import com.cak3d.gtawatch.WatchService
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+private fun pair(ctx: Context, address: String, name: String) {
+    Store.deviceAddress = address
+    Store.deviceName = name
+    Companion.observe(ctx, address)
+    WatchService.start(ctx)
+    WatchService.instance?.link?.connect(address)
+}
 
 @Composable
 fun WatchScreen() {
@@ -59,17 +78,25 @@ fun WatchScreen() {
     val detail by Store.linkDetail.collectAsState()
     val rssi by Store.rssi.collectAsState()
     val t by Store.telemetry.collectAsState()
-    val settings by Store.settings.collectAsState()
     val mapStatus by Store.mapStatus.collectAsState()
     val log by Store.log.collectAsState()
     val running by Store.serviceRunning.collectAsState()
+    val history by Store.batteryHistory.collectAsState()
+    var pairError by remember { mutableStateOf("") }
     var scanning by remember { mutableStateOf(false) }
+    var crash by remember { mutableStateOf(CrashLog.read()) }
     val found = remember { mutableStateListOf<FoundWatch>() }
     val scanner = remember { BleLink(ctx, object : BleLink.Listener {
         override fun onReady() {}
         override fun onMessage(type: Int, payload: ByteArray) {}
         override fun onDisconnected() {}
     }) }
+
+    // Android's companion pairing sheet (same mechanism Galaxy Wearable uses)
+    val pairLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { r ->
+        val dev = Companion.parseResult(r.data)
+        if (dev != null) pair(ctx, dev.first, dev.second) else pairError = "No watch selected"
+    }
 
     LaunchedEffect(scanning) {
         if (scanning) {
@@ -88,6 +115,19 @@ fun WatchScreen() {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp)) {
         Text("Watch", fontSize = 30.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 18.dp, start = 4.dp))
 
+        crash?.let { c ->
+            Card(Modifier.padding(top = 12.dp)) {
+                Text("The app crashed last time", color = Gta.red, fontWeight = FontWeight.Bold)
+                Text(c.lines().take(6).joinToString("\n"), fontFamily = FontFamily.Monospace, fontSize = 10.sp, color = Gta.dim)
+                Row {
+                    TextButton({
+                        (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("GTA-Watch crash", c))
+                    }) { Text("Copy report") }
+                    TextButton({ CrashLog.clear(); crash = null }) { Text("Dismiss") }
+                }
+            }
+        }
+
         // ---- connection
         Card(Modifier.padding(top = 12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -100,7 +140,7 @@ fun WatchScreen() {
                 Column(Modifier.padding(start = 12.dp).weight(1f)) {
                     Text(Store.deviceName ?: "No watch paired", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
                     Text(when (link) {
-                        LinkState.CONNECTED -> "Connected · $detail · ${rssi} dBm"
+                        LinkState.CONNECTED -> "Connected · $detail · $rssi dBm"
                         LinkState.CONNECTING -> detail.ifBlank { "Connecting…" }
                         LinkState.SCANNING -> "Scanning…"
                         LinkState.OFF -> if (running) "Disconnected" else "Service stopped"
@@ -110,24 +150,29 @@ fun WatchScreen() {
             }
             Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button({ scanning = true }, enabled = !scanning,
-                    colors = ButtonDefaults.buttonColors(containerColor = Gta.green, contentColor = Color.Black)) {
-                    Text(if (scanning) "Scanning…" else if (Store.deviceAddress == null) "Find watch" else "Change watch")
+                Button({
+                    pairError = ""
+                    Companion.associate(ctx, { pairLauncher.launch(IntentSenderRequest.Builder(it).build()) }, { pairError = it })
+                }, colors = ButtonDefaults.buttonColors(containerColor = Gta.green, contentColor = Color.Black)) {
+                    Text(if (Store.deviceAddress == null) "Pair watch" else "Pair again")
                 }
                 if (Store.deviceAddress != null) {
                     if (running) OutlinedButton({ WatchService.stop(ctx) }) { Text("Stop") }
                     else OutlinedButton({ WatchService.start(ctx) }) { Text("Start") }
                 }
             }
+            if (Store.deviceAddress != null && !Companion.isAssociated(ctx, Store.deviceAddress)) {
+                Text("Tip: tap Pair again once to register the watch with Android's companion system, so it stays connected in the background like a Galaxy Watch.",
+                    color = Gta.yellow, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+            }
+            if (pairError.isNotEmpty()) Text(pairError, color = Gta.dim, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+            TextButton({ scanning = true }, enabled = !scanning) { Text(if (scanning) "Scanning…" else "Pairing not working? Scan manually") }
             found.forEach { w ->
-                Row(Modifier.fillMaxWidth().padding(top = 8.dp).background(Gta.cardHi, RoundedCornerShape(14.dp)).clickable {
-                    Store.deviceAddress = w.address
-                    Store.deviceName = w.name
+                Row(Modifier.fillMaxWidth().padding(top = 6.dp).background(Gta.cardHi, RoundedCornerShape(14.dp)).clickable {
                     scanner.stopScan()
                     scanning = false
                     found.clear()
-                    WatchService.start(ctx)
-                    WatchService.instance?.link?.connect(w.address)
+                    pair(ctx, w.address, w.name)
                 }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(w.name, fontWeight = FontWeight.SemiBold)
@@ -136,15 +181,39 @@ fun WatchScreen() {
                     Text("${w.rssi} dBm", color = Gta.dim, fontSize = 12.sp)
                 }
             }
-            if (scanning && found.isEmpty()) Text("Make sure the watch is on and nearby.", color = Gta.dim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
         }
 
-        // ---- telemetry from the watch
+        // ---- battery
+        SectionTitle("Watch battery")
+        Card {
+            val fresh = t.receivedAt > 0
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(if (fresh && t.battery >= 0) "${t.battery}%" else "–", fontSize = 40.sp, fontWeight = FontWeight.Bold,
+                    color = if (t.battery in 0..15) Gta.red else Gta.green)
+                Column(Modifier.padding(start = 14.dp)) {
+                    Text(when {
+                        !fresh -> "Waiting for the watch"
+                        t.charging -> "Charging"
+                        t.usb -> "Plugged in · full"
+                        t.battery in 0..15 -> "Low · power saver on"
+                        else -> "On battery"
+                    }, fontWeight = FontWeight.SemiBold)
+                    if (fresh) Text("${t.millivolts} mV", color = Gta.dim, fontSize = 12.sp)
+                }
+            }
+            if (history.size >= 2) {
+                Spacer(Modifier.height(10.dp))
+                BatteryChart(history)
+                Text("Last ${((history.last().first - history.first().first) / 3_600_000.0).let { if (it < 1) "${(it * 60).toInt()} min" else "%.1f h".format(it) }}",
+                    color = Gta.dim, fontSize = 11.sp)
+            }
+        }
+
+        // ---- telemetry
         SectionTitle("From the watch")
         Card {
             val fresh = t.receivedAt > 0
             Row {
-                Stat("Battery", if (t.battery >= 0) "${t.battery}%" else "–", if (t.charging) "charging" else if (fresh) "${t.millivolts} mV" else "", Modifier.weight(1f))
                 Stat("Steps", if (fresh) "%,d".format(t.steps) else "–", "today", Modifier.weight(1f))
                 Stat("Uptime", if (fresh) "${t.uptimeSec / 3600}h ${(t.uptimeSec / 60) % 60}m" else "–", if (fresh) "fw ${t.fw}" else "", Modifier.weight(1f))
             }
@@ -166,48 +235,8 @@ fun WatchScreen() {
             OutlinedButton({ WatchService.instance?.link?.send(Protocol.NOTIFY_CLEAR, ByteArray(0)) }) { Text("Clear alerts") }
         }
 
-        // ---- settings
-        SectionTitle("Watch settings")
-        Card {
-            fun push(f: (Settings) -> Settings) {
-                Store.updateSettings(f)
-                WatchService.instance?.sendSettings()
-            }
-            Toggle("24-hour clock", settings.h24) { v -> push { it.copy(h24 = v) } }
-            Toggle("Metric units", settings.metric) { v -> push { it.copy(metric = v) } }
-            Toggle("Walk by default (watch routes)", settings.walkDefault) { v -> push { it.copy(walkDefault = v) } }
-            Toggle("Forward phone notifications", settings.forwardNotifications) { v -> push { it.copy(forwardNotifications = v) } }
-            Text("Screen timeout: ${settings.screenTimeout}s", modifier = Modifier.padding(top = 8.dp))
-            Slider(settings.screenTimeout.toFloat(), { v -> Store.updateSettings { it.copy(screenTimeout = v.toInt()) } },
-                valueRange = 5f..60f, onValueChangeFinished = { WatchService.instance?.sendSettings() }, colors = sliderColors())
-            Text("Brightness")
-            Slider(settings.brightness.toFloat(), { v -> Store.updateSettings { it.copy(brightness = v.toInt()) } },
-                valueRange = 20f..255f, onValueChangeFinished = { WatchService.instance?.sendSettings() }, colors = sliderColors())
-        }
-
-        SectionTitle("Vehicle (gas cost on routes)")
-        Card {
-            Text("Fuel economy: ${settings.mpg.toInt()} mpg")
-            Slider(settings.mpg.toFloat(), { v -> Store.updateSettings { it.copy(mpg = v.toDouble()) } }, valueRange = 8f..60f, colors = sliderColors())
-            Text("Gas price: $%.2f / gal".format(settings.gasPrice))
-            Slider(settings.gasPrice.toFloat(), { v -> Store.updateSettings { it.copy(gasPrice = (v * 100).toInt() / 100.0) } }, valueRange = 2f..7f, colors = sliderColors())
-        }
-
-        SectionTitle("Phone permissions")
-        Card {
-            Text("Notification access lets texts and app alerts appear on the watch.", color = Gta.dim, fontSize = 13.sp)
-            OutlinedButton({ ctx.startActivity(Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS")) }) { Text("Notification access") }
-            Spacer(Modifier.height(8.dp))
-            Text("\"Display over other apps\" lets a tap on the watch's minimap pop the big map open.", color = Gta.dim, fontSize = 13.sp)
-            OutlinedButton({
-                ctx.startActivity(Intent(AndroidSettings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}")))
-            }) { Text("Allow map pop-up") }
-            Spacer(Modifier.height(8.dp))
-            Text("Battery: set GTA-Watch to \"Unrestricted\" so the watch stays connected with the screen off.", color = Gta.dim, fontSize = 13.sp)
-            OutlinedButton({
-                ctx.startActivity(Intent(AndroidSettings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}")))
-            }) { Text("App battery settings") }
-        }
+        SectionTitle("Updates")
+        UpdateCard()
 
         SectionTitle("Link log")
         Card {
@@ -218,14 +247,89 @@ fun WatchScreen() {
     }
 }
 
+/** App + watch updates from GitHub Releases. Shared by the Watch and Settings tabs. */
 @Composable
-private fun sliderColors() = SliderDefaults.colors(thumbColor = Gta.green, activeTrackColor = Gta.green)
+fun UpdateCard() {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val rel by Store.update.collectAsState()
+    val status by Store.updateStatus.collectAsState()
+    val ota by Store.otaProgress.collectAsState()
+    val t by Store.telemetry.collectAsState()
+    var dl by remember { mutableStateOf(-1) }
+    val appVer = Updater.appVersion(ctx)
+
+    Card {
+        Text("App $appVer · Watch ${t.fw.ifEmpty { "–" }}", fontWeight = FontWeight.SemiBold)
+        if (status.isNotEmpty()) Text(status, color = Gta.dim, fontSize = 13.sp)
+        rel?.let { r ->
+            if (Updater.newer(r.version, appVer) && r.apkUrl != null) {
+                Button({
+                    scope.launch {
+                        try {
+                            val f = withContext(Dispatchers.IO) { Updater.download(r.apkUrl, java.io.File(ctx.cacheDir, "update.apk")) { dl = it } }
+                            Updater.installApk(ctx, f)
+                        } catch (e: Exception) {
+                            Store.updateStatus.value = "Download failed: ${e.message}"
+                        } finally {
+                            dl = -1
+                        }
+                    }
+                }, enabled = dl < 0, colors = ButtonDefaults.buttonColors(containerColor = Gta.green, contentColor = Color.Black)) {
+                    Text("Update app to ${r.version}")
+                }
+            }
+            if (t.fw.isNotEmpty() && Updater.newer(r.version, t.fw) && r.firmwareUrl != null) {
+                Button({
+                    scope.launch {
+                        try {
+                            val f = withContext(Dispatchers.IO) { Updater.download(r.firmwareUrl, java.io.File(ctx.cacheDir, "watch.bin")) { dl = it } }
+                            dl = -1
+                            WatchService.instance?.updateWatch(f.readBytes(), r.version)
+                        } catch (e: Exception) {
+                            Store.updateStatus.value = "Download failed: ${e.message}"
+                            dl = -1
+                        }
+                    }
+                }, enabled = dl < 0 && ota < 0 && Store.link.value == LinkState.CONNECTED,
+                    colors = ButtonDefaults.buttonColors(containerColor = Gta.blue, contentColor = Color.Black)) {
+                    Text("Update watch to ${r.version}")
+                }
+            }
+        }
+        if (dl >= 0) {
+            Text("Downloading… $dl%", color = Gta.dim, fontSize = 12.sp)
+            LinearProgressIndicator(progress = { dl / 100f }, modifier = Modifier.fillMaxWidth(), color = Gta.green)
+        }
+        if (ota >= 0) {
+            Text("Sending to watch… $ota% (keep the phone close)", color = Gta.dim, fontSize = 12.sp)
+            LinearProgressIndicator(progress = { ota / 100f }, modifier = Modifier.fillMaxWidth(), color = Gta.blue)
+        }
+        OutlinedButton({ WatchService.instance?.checkForUpdates(notify = false) ?: run { Store.updateStatus.value = "Start the watch service first" } },
+            modifier = Modifier.padding(top = 6.dp)) { Text("Check for updates") }
+    }
+}
 
 @Composable
-private fun Toggle(label: String, value: Boolean, onChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, Modifier.weight(1f))
-        Switch(value, onChange, colors = SwitchDefaults.colors(checkedTrackColor = Gta.green, checkedThumbColor = Color.Black))
+private fun BatteryChart(h: List<Triple<Long, Int, Boolean>>) {
+    Canvas(Modifier.fillMaxWidth().height(70.dp)) {
+        val t0 = h.first().first
+        val span = (h.last().first - t0).coerceAtLeast(1)
+        fun pt(s: Triple<Long, Int, Boolean>) = Offset((s.first - t0).toFloat() / span * size.width, size.height * (1 - s.second / 100f))
+        for (y in listOf(0.25f, 0.5f, 0.75f)) drawLine(Color(0xFF23282B), Offset(0f, size.height * y), Offset(size.width, size.height * y), 1f)
+        for (i in 1 until h.size) {
+            val a = pt(h[i - 1])
+            val b = pt(h[i])
+            drawLine(if (h[i].third) Gta.yellow else Gta.green, a, b, 5f)
+        }
+        val p = Path().apply {
+            moveTo(0f, size.height)
+            h.forEach { val o = pt(it); lineTo(o.x, o.y) }
+            lineTo(size.width, size.height)
+            close()
+        }
+        drawPath(p, Gta.green.copy(alpha = 0.12f))
+        drawRect(Color(0xFF23282B), style = Stroke(1f))
     }
 }
 

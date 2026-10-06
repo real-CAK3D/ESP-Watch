@@ -13,6 +13,7 @@ class GtaWatchApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        CrashLog.install(this)
         Store.init(this)
         MapLibre.getInstance(this)
         val nm = getSystemService(NotificationManager::class.java)

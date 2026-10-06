@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Watch
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -36,6 +37,7 @@ import com.cak3d.gtawatch.ui.Gta
 import com.cak3d.gtawatch.ui.GtaTheme
 import com.cak3d.gtawatch.ui.MapScreen
 import com.cak3d.gtawatch.ui.PlacesScreen
+import com.cak3d.gtawatch.ui.SettingsScreen
 import com.cak3d.gtawatch.ui.WatchScreen
 
 class MainActivity : ComponentActivity() {
@@ -103,6 +105,7 @@ private fun App(radarRequest: Long) {
                 NavigationBarItem(tab == 0, { tab = 0 }, { Icon(Icons.Filled.Map, null) }, label = { Text("Map") }, colors = colors)
                 NavigationBarItem(tab == 1, { tab = 1 }, { Icon(Icons.Filled.Place, null) }, label = { Text("Places") }, colors = colors)
                 NavigationBarItem(tab == 2, { tab = 2 }, { Icon(Icons.Filled.Watch, null) }, label = { Text("Watch") }, colors = colors)
+                NavigationBarItem(tab == 3, { tab = 3 }, { Icon(Icons.Filled.Settings, null) }, label = { Text("Settings") }, colors = colors)
             }
         },
     ) { pad ->
@@ -110,7 +113,8 @@ private fun App(radarRequest: Long) {
             when (tab) {
                 0 -> MapScreen(radarTick)
                 1 -> PlacesScreen(onNavigate = { tab = 0 })
-                else -> WatchScreen()
+                2 -> WatchScreen()
+                else -> SettingsScreen()
             }
         }
     }

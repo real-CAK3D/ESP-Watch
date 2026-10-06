@@ -22,6 +22,7 @@ void goPage(Page p, bool animate = true);
 
 void toast(const char *text, const char *icon = nullptr);
 void formatClock(char *out, size_t n, bool withSeconds);
+void otaProgress(int pct, const char *text);  // pct < 0 = failed
 
 // events from state/phone
 void onNavStarted();

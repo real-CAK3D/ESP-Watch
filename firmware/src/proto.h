@@ -31,15 +31,21 @@ enum : uint8_t {
   MSG_ROUTE = 0x06,     // binary: i32 lat0e7, i32 lon0e7, u16 n, n*(i16 x, i16 y) in 0.5 m units
   MSG_NOTIFY = 0x07,    // JSON {"id","app","title","body"}
   MSG_PLACES = 0x08,    // JSON [{"n":name,"k":kind,"lat","lon"}]
-  MSG_SETTINGS = 0x09,  // JSON {"h24","metric","timeout","bright","pbat"}
+  MSG_SETTINGS = 0x09,  // JSON {"h24","metric","timeout","bright","zoom"(0-2),"terrain","raise","face"(0-1),"keepOnNav"}
   MSG_PHONE = 0x0A,     // JSON {"bat","chg"} phone battery for the minimap armor bar
   MSG_PING = 0x0B,      // empty; watch answers with telemetry
   MSG_NOTIFY_CLEAR = 0x0C,
+  MSG_TERRAIN = 0x0D,    // binary hillshade grid, see terrain.h
+  MSG_OTA_BEGIN = 0x10,  // JSON {"size":bytes,"ver":"x.y.z"} -> watch erases the spare app slot
+  MSG_OTA_DATA = 0x11,   // binary [u32 offset][bytes...] (<= 8 KB), each block ACKed via OTA_STATUS
+  MSG_OTA_END = 0x12,    // empty -> verify, switch boot slot, restart
 };
 
 // watch -> phone
 enum : uint8_t {
   MSG_TELEMETRY = 0x81,  // JSON {"fw","bat","mv","chg","steps","up","heap","psram","scr","page"}
-  MSG_EVENT = 0x82,      // JSON {"e":name,...}: open_map, navigate{i}, save_parking, find_phone, nav_stop, hello
+  MSG_EVENT = 0x82,      // JSON {"e":name,...}: open_map, navigate{i}, save_parking, find_phone, nav_stop, hello,
+                         //   battery_low{pct}, charged
   MSG_LOG = 0x83,        // text
+  MSG_OTA_STATUS = 0x84, // JSON {"st":"ready|ack|done|error","off":bytes_written,"err":"..."}
 };

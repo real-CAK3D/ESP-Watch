@@ -32,7 +32,17 @@ int batteryMillivolts();
 bool charging();
 bool usbPowered();
 
+// Charging
+bool takeUsbPlugged();   // edge: USB power just connected
+bool takeChargeFull();   // edge: battery just reached full
+bool chargeComplete();
+int chargeEtaMinutes();  // -1 while unknown
+void setPowerSaver(bool on);  // caps brightness (low battery)
+bool powerSaverOn();
+
 // Motion
+void setRaiseToWake(bool on);
+void accel(float &x, float &y, float &z);
 uint32_t stepsToday();
 void resetSteps();
 

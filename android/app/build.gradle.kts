@@ -12,8 +12,8 @@ android {
         applicationId = "com.cak3d.gtawatch"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 4
+        versionName = "2.1.0"
         // Modern Android phones (incl. Samsung Galaxy) are 64-bit ARM; skipping other ABIs keeps the APK small.
         ndk { abiFilters += listOf("arm64-v8a") }
     }
