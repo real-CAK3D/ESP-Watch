@@ -1,3 +1,0 @@
-[submodule "chronos-esp32"]
-	path = chronos-esp32
-	url = https://github.com/fbiego/chronos-esp32.git
